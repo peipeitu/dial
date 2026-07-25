@@ -85,7 +85,7 @@ Build all artifacts from the repository root after installing dependencies.
 
 No macOS package is published for now. macOS distribution needs a Developer ID certificate, signing, and notarization to avoid Gatekeeper warnings, and the updater flow also needs a separate signed macOS artifact.
 
-For local self-use, you can still build an unsigned app on your own Mac:
+For local self-use, you can build an ad-hoc signed app on your own Mac. This validates the local bundle structure but does not replace Developer ID signing or notarization:
 
 ```sh
 npm run package:mac
@@ -94,6 +94,8 @@ npm run package:mac
 Output:
 
 - `src-tauri/target/release/bundle/macos/AI Usage.app`
+
+The packaging command applies an ad-hoc signature and runs strict `codesign` verification before it succeeds.
 
 Install from the local app bundle:
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.8 - 2026-07-25
+
+- Add a dedicated today token metric with period-share progress while keeping the latest token context in the featured summary.
+- Show an explicit unavailable state when a provider has no reliable cost model instead of substituting token totals into cost cards.
+- Add scan cache diagnostics and a per-provider cache rebuild action to Settings, including elapsed time, cache hits, reparses, deletions, and failures.
+- Fix macOS provider defaults being mistaken for Windows paths because `darwin` contains the substring `win`.
+- Add renderer contract tests for metric mappings and cache diagnostics, and ad-hoc sign plus strictly verify local macOS app bundles after packaging.
+
 ## 0.1.7 - 2026-07-18
 
 - Add versioned per-file persistent scan caches for Codex, Claude Code, GitHub Copilot, Cursor, and ChatGPT so unchanged local data no longer needs to be parsed on every refresh.

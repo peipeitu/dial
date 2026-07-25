@@ -22,6 +22,8 @@ function detectPlatform() {
 const aiUsage = window.aiUsage || {
   platform: detectPlatform(),
   getStats: (provider) => tauriCore.invoke("get_stats", { provider }),
+  rebuildStatsCache: (provider) => tauriCore.invoke("rebuild_stats_cache", { provider }),
+  getScanDiagnostics: () => tauriCore.invoke("get_scan_diagnostics"),
   chooseHome: (provider) => tauriCore.invoke("choose_home", { provider }),
   getSettings: () => tauriCore.invoke("get_settings"),
   updateSettings: (settings) => tauriCore.invoke("update_settings", { settings }),
@@ -74,6 +76,9 @@ let settingsSavedAt = new Date();
 let autoRefreshTimer = null;
 let autoRefreshCountdownTimer = null;
 let autoRefreshDueAt = null;
+let scanDiagnostics = [];
+let cacheRebuildInProgress = false;
+let cacheRebuildResult = null;
 const statsCache = new Map();
 
 function normalizeChartDays(value, fallback = DEFAULT_CHART_DAYS) {
@@ -93,30 +98,30 @@ function normalizeAutoRefreshMinutes(value, fallback = DEFAULT_AUTO_REFRESH_MINU
 }
 
 function defaultCopilotHome() {
-  if (aiUsage.platform?.includes("win")) {
+  if (aiUsage.platform === "windows" || aiUsage.platform === "win32") {
     return "%APPDATA%/Code/User/globalStorage/github.copilot-chat";
   }
-  if (aiUsage.platform?.includes("linux")) {
+  if (aiUsage.platform === "linux") {
     return "~/.config/Code/User/globalStorage/github.copilot-chat";
   }
   return "~/Library/Application Support/Code/User/globalStorage/github.copilot-chat";
 }
 
 function defaultCursorHome() {
-  if (aiUsage.platform?.includes("win")) {
+  if (aiUsage.platform === "windows" || aiUsage.platform === "win32") {
     return "%APPDATA%/Cursor/User/globalStorage";
   }
-  if (aiUsage.platform?.includes("linux")) {
+  if (aiUsage.platform === "linux") {
     return "~/.config/Cursor/User/globalStorage";
   }
   return "~/Library/Application Support/Cursor/User/globalStorage";
 }
 
 function defaultChatgptHome() {
-  if (aiUsage.platform?.includes("win")) {
+  if (aiUsage.platform === "windows" || aiUsage.platform === "win32") {
     return "%APPDATA%/com.openai.chat";
   }
-  if (aiUsage.platform?.includes("linux")) {
+  if (aiUsage.platform === "linux") {
     return "~/.config/com.openai.chat";
   }
   return "~/Library/Application Support/com.openai.chat";
@@ -169,6 +174,7 @@ const I18N = {
     general: "常规",
     appearance: "个性化",
     chart: "图表",
+    dataAndCache: "数据与缓存",
     providerEnabled: "启用",
     repository: "仓库",
     feedback: "反馈",
@@ -183,14 +189,13 @@ const I18N = {
     localActivityEstimateHint: "基于本地会话活动推算，不代表 ChatGPT 官方限额。",
     todayCost: "今日费用",
     periodCost: "近 {days} 天费用",
-    todayTokens: "今日 token",
-    periodUsageTokens: "近 {days} 天 token",
+    costUnavailable: "暂无可靠定价",
+    notAvailable: "不可用",
+    todayTokens: "今日 token 用量",
     periodTokens: "近 {days} 天 token 用量",
     periodAccumulated: "{days} 天累计",
     periodTokenContext: "总 token {total} · 最近 {latest}",
-    latestTokenUsage: "最近 token 用量",
-    latestTokenUsageShare: "最近 token 占当前周期 token 的 {percent}%",
-    latestTokenUsageHint: "如果今天有 token 记录，显示今日累计；否则显示最近一次 token 记录；没有 token 事件时使用最近会话估算。",
+    todayTokenUsageShare: "今日 token 占当前周期 token 的 {percent}%",
     threadsTotal: "总会话",
     threadsActive: "活跃",
     tokensTotal: "总 token",
@@ -228,6 +233,18 @@ const I18N = {
     autoRefreshEnabled: "启用",
     autoRefreshSuffix: "分钟",
     autoRefreshCountdown: "{time} 后刷新",
+    scanProvider: "当前服务",
+    latestScan: "最近扫描",
+    scanCache: "扫描缓存",
+    noScanDiagnostics: "刷新后显示",
+    scanSummary: "{elapsed} ms · 命中 {hits}/{files}（{rate}%）",
+    scanMeta: "重新解析 {parsed} · 删除 {deleted} · 失败 {failed}",
+    scanCacheReady: "缓存运行正常",
+    scanCompletedWithFailures: "扫描完成，{count} 个文件失败",
+    rebuildCache: "重建缓存",
+    rebuildingCache: "正在重建",
+    cacheRebuildComplete: "缓存已重建，统计已刷新",
+    cacheRebuildError: "无法重建缓存",
     dataFolder: "数据目录",
     chooseFolder: "选择目录",
     language: "语言",
@@ -280,6 +297,7 @@ const I18N = {
     general: "General",
     appearance: "Personalization",
     chart: "Chart",
+    dataAndCache: "Data & cache",
     providerEnabled: "Enabled",
     repository: "GitHub",
     feedback: "Feedback",
@@ -294,15 +312,13 @@ const I18N = {
     localActivityEstimateHint: "Estimated from local conversation activity; it is not an official ChatGPT quota.",
     todayCost: "Today cost",
     periodCost: "{days}-day cost",
-    todayTokens: "Today tokens",
-    periodUsageTokens: "{days}-day tokens",
+    costUnavailable: "Reliable pricing unavailable",
+    notAvailable: "N/A",
+    todayTokens: "Today token usage",
     periodTokens: "{days}-day token usage",
     periodAccumulated: "{days}-day total",
     periodTokenContext: "Total tokens {total} · latest {latest}",
-    latestTokenUsage: "Latest token usage",
-    latestTokenUsageShare: "Latest token usage is {percent}% of the current period",
-    latestTokenUsageHint:
-      "Shows today's total when token events exist today; otherwise the latest token event, or the latest thread estimate.",
+    todayTokenUsageShare: "Today's token usage is {percent}% of the current period",
     threadsTotal: "Total threads",
     threadsActive: "Active",
     tokensTotal: "Total tokens",
@@ -340,6 +356,18 @@ const I18N = {
     autoRefreshEnabled: "Enabled",
     autoRefreshSuffix: "min",
     autoRefreshCountdown: "Refresh in {time}",
+    scanProvider: "Current service",
+    latestScan: "Latest scan",
+    scanCache: "Scan cache",
+    noScanDiagnostics: "Shown after refresh",
+    scanSummary: "{elapsed} ms · {hits}/{files} cached ({rate}%)",
+    scanMeta: "{parsed} parsed · {deleted} deleted · {failed} failed",
+    scanCacheReady: "Cache is working",
+    scanCompletedWithFailures: "Scan completed with {count} failed files",
+    rebuildCache: "Rebuild cache",
+    rebuildingCache: "Rebuilding",
+    cacheRebuildComplete: "Cache rebuilt and stats refreshed",
+    cacheRebuildError: "Unable to rebuild cache",
     dataFolder: "Data folder",
     chooseFolder: "Choose folder",
     language: "Language",
@@ -397,6 +425,7 @@ const elements = {
   settingsGeneralNavLabel: document.getElementById("settingsGeneralNavLabel"),
   settingsAppearanceNavLabel: document.getElementById("settingsAppearanceNavLabel"),
   settingsChartNavLabel: document.getElementById("settingsChartNavLabel"),
+  settingsDataNavLabel: document.getElementById("settingsDataNavLabel"),
   settingsUpdateNavLabel: document.getElementById("settingsUpdateNavLabel"),
   settingsCodexNavLabel: document.getElementById("settingsCodexNavLabel"),
   settingsClaudeNavLabel: document.getElementById("settingsClaudeNavLabel"),
@@ -430,12 +459,12 @@ const elements = {
   periodUsagePercent: document.getElementById("periodUsagePercent"),
   periodTokens: document.getElementById("periodTokens"),
   periodTokensContext: document.getElementById("periodTokensContext"),
-  latestTokenUsage: document.getElementById("latestTokenUsage"),
-  latestTokenUsageMeter: document.getElementById("latestTokenUsageMeter"),
+  todayTokens: document.getElementById("todayTokens"),
+  todayTokensMeter: document.getElementById("todayTokensMeter"),
   todayCostLabel: document.getElementById("todayCostLabel"),
   periodCostLabel: document.getElementById("periodCostLabel"),
   periodTokensLabel: document.getElementById("periodTokensLabel"),
-  latestTokenUsageLabel: document.getElementById("latestTokenUsageLabel"),
+  todayTokensLabel: document.getElementById("todayTokensLabel"),
   activityTitle: document.getElementById("activityTitle"),
   threadsTotalLabel: document.getElementById("threadsTotalLabel"),
   threadsActiveLabel: document.getElementById("threadsActiveLabel"),
@@ -482,7 +511,16 @@ const elements = {
   settingsChatgptProviderTitle: document.getElementById("settingsChatgptProviderTitle"),
   settingsAppearanceTitle: document.getElementById("settingsAppearanceTitle"),
   settingsChartTitle: document.getElementById("settingsChartTitle"),
+  settingsDataTitle: document.getElementById("settingsDataTitle"),
   settingsUpdateTitle: document.getElementById("settingsUpdateTitle"),
+  scanProviderLabel: document.getElementById("scanProviderLabel"),
+  scanProviderValue: document.getElementById("scanProviderValue"),
+  latestScanLabel: document.getElementById("latestScanLabel"),
+  scanDiagnosticsSummary: document.getElementById("scanDiagnosticsSummary"),
+  scanDiagnosticsMeta: document.getElementById("scanDiagnosticsMeta"),
+  cacheManagementLabel: document.getElementById("cacheManagementLabel"),
+  rebuildCacheStatus: document.getElementById("rebuildCacheStatus"),
+  rebuildCacheButton: document.getElementById("rebuildCacheButton"),
   providerEnabledLabels: Array.from(document.querySelectorAll("[data-provider-enabled-label]")),
   providerToggleLabels: Array.from(document.querySelectorAll("[data-provider-toggle-label]")),
   codexHomeLabel: document.getElementById("codexHomeLabel"),
@@ -910,15 +948,71 @@ function renderSettingsStatus() {
   elements.settingsStatus.textContent = t("settingsSavedAt", { time: formatTime(settingsSavedAt) });
 }
 
-function updateLatestTokenUsageMeter(percent) {
+function activeScanDiagnostics() {
+  return scanDiagnostics.find((diagnostics) => diagnostics.provider === currentSettings.activeProvider) || null;
+}
+
+function renderScanDiagnostics() {
+  const provider = PROVIDERS[currentSettings.activeProvider] || PROVIDERS.codex;
+  const diagnostics = activeScanDiagnostics();
+  const rebuildResult =
+    cacheRebuildResult?.provider === currentSettings.activeProvider ? cacheRebuildResult : null;
+
+  elements.scanProviderValue.textContent = provider.label;
+  if (diagnostics) {
+    elements.scanDiagnosticsSummary.textContent = t("scanSummary", {
+      elapsed: formatNumber(diagnostics.elapsedMs),
+      hits: formatNumber(diagnostics.cacheHits),
+      files: formatNumber(diagnostics.totalFiles),
+      rate: Math.round(Number(diagnostics.cacheHitRate) || 0)
+    });
+    elements.scanDiagnosticsMeta.textContent = t("scanMeta", {
+      parsed: formatNumber(diagnostics.parsedFiles),
+      deleted: formatNumber(diagnostics.deletedFiles),
+      failed: formatNumber(diagnostics.failedFiles)
+    });
+  } else {
+    elements.scanDiagnosticsSummary.textContent = t("noScanDiagnostics");
+    elements.scanDiagnosticsMeta.textContent = "-";
+  }
+
+  if (cacheRebuildInProgress) {
+    elements.rebuildCacheStatus.textContent = t("rebuildingCache");
+  } else if (rebuildResult?.error) {
+    elements.rebuildCacheStatus.textContent = rebuildResult.error;
+  } else if (rebuildResult) {
+    elements.rebuildCacheStatus.textContent = t("cacheRebuildComplete");
+  } else if (Number(diagnostics?.failedFiles) > 0) {
+    elements.rebuildCacheStatus.textContent = t("scanCompletedWithFailures", {
+      count: formatNumber(diagnostics.failedFiles)
+    });
+  } else {
+    elements.rebuildCacheStatus.textContent = diagnostics ? t("scanCacheReady") : "-";
+  }
+
+  elements.rebuildCacheButton.disabled = currentLoading || cacheRebuildInProgress;
+  elements.rebuildCacheButton.textContent = cacheRebuildInProgress ? t("rebuildingCache") : t("rebuildCache");
+}
+
+async function refreshScanDiagnostics() {
+  try {
+    const diagnostics = await aiUsage.getScanDiagnostics();
+    scanDiagnostics = Array.isArray(diagnostics) ? diagnostics : [];
+  } catch {
+    scanDiagnostics = [];
+  }
+  renderScanDiagnostics();
+}
+
+function updateTodayTokensMeter(percent) {
   const normalized = Number.isFinite(percent) ? Math.min(100, Math.max(0, percent)) : 0;
   const visiblePercent = normalized > 0 ? Math.max(3, normalized) : 0;
   const rounded = Math.round(normalized);
-  const label = t("latestTokenUsageShare", { percent: rounded });
-  elements.latestTokenUsageMeter.style.setProperty("--latest-token-progress", `${visiblePercent}%`);
-  elements.latestTokenUsageMeter.setAttribute("aria-valuenow", String(rounded));
-  elements.latestTokenUsageMeter.setAttribute("aria-label", label);
-  elements.latestTokenUsageMeter.setAttribute("title", label);
+  const label = t("todayTokenUsageShare", { percent: rounded });
+  elements.todayTokensMeter.style.setProperty("--today-token-progress", `${visiblePercent}%`);
+  elements.todayTokensMeter.setAttribute("aria-valuenow", String(rounded));
+  elements.todayTokensMeter.setAttribute("aria-label", label);
+  elements.todayTokensMeter.setAttribute("title", label);
 }
 
 function costMetricsAvailable(stats = lastStats) {
@@ -928,23 +1022,28 @@ function costMetricsAvailable(stats = lastStats) {
   return currentSettings.activeProvider === "codex";
 }
 
-function renderCostMetricLabels(chartDays, stats = lastStats) {
-  if (costMetricsAvailable(stats)) {
-    elements.todayCostLabel.textContent = t("todayCost");
-    elements.periodCostLabel.textContent = t("periodCost", { days: chartDays });
-  } else {
-    elements.todayCostLabel.textContent = t("todayTokens");
-    elements.periodCostLabel.textContent = t("periodUsageTokens", { days: chartDays });
-  }
+function renderCostMetricLabels(chartDays) {
+  elements.todayCostLabel.textContent = t("todayCost");
+  elements.periodCostLabel.textContent = t("periodCost", { days: chartDays });
+  elements.todayCostLabel.removeAttribute("title");
+  elements.periodCostLabel.removeAttribute("title");
+  elements.todayCost.removeAttribute("title");
+  elements.periodCost.removeAttribute("title");
 }
 
 function renderCostMetricValues(stats) {
   if (costMetricsAvailable(stats)) {
     elements.todayCost.textContent = formatCurrency(stats.featured.todayCost);
     elements.periodCost.textContent = formatCurrency(stats.featured.periodCost);
+    elements.todayCost.removeAttribute("title");
+    elements.periodCost.removeAttribute("title");
   } else {
-    elements.todayCost.textContent = formatCompact(stats.featured.todayTokens || 0);
-    elements.periodCost.textContent = formatCompact(stats.featured.periodTokens || 0);
+    elements.todayCost.textContent = t("notAvailable");
+    elements.periodCost.textContent = t("notAvailable");
+    elements.todayCostLabel.setAttribute("title", t("costUnavailable"));
+    elements.periodCostLabel.setAttribute("title", t("costUnavailable"));
+    elements.todayCost.setAttribute("title", t("costUnavailable"));
+    elements.periodCost.setAttribute("title", t("costUnavailable"));
   }
 }
 
@@ -964,6 +1063,7 @@ function applyLanguage() {
   elements.settingsGeneralNavLabel.textContent = t("general");
   elements.settingsAppearanceNavLabel.textContent = t("appearance");
   elements.settingsChartNavLabel.textContent = t("chart");
+  elements.settingsDataNavLabel.textContent = t("dataAndCache");
   elements.settingsUpdateNavLabel.textContent = t("updates");
   elements.settingsCodexNavLabel.textContent = PROVIDERS.codex.label;
   elements.settingsClaudeNavLabel.textContent = PROVIDERS.claude.label;
@@ -995,10 +1095,9 @@ function applyLanguage() {
       latest: formatCompact(lastStats.featured.latestTokenUsage)
     });
   }
-  elements.latestTokenUsageLabel.textContent = t("latestTokenUsage");
-  elements.latestTokenUsageLabel.setAttribute("title", t("latestTokenUsageHint"));
-  updateLatestTokenUsageMeter(
-    lastStats ? statsRatioPercent(lastStats.featured.latestTokenUsage, lastStats.featured.periodTokens) : 0
+  elements.todayTokensLabel.textContent = t("todayTokens");
+  updateTodayTokensMeter(
+    lastStats ? statsRatioPercent(lastStats.featured.todayTokens, lastStats.featured.periodTokens) : 0
   );
   elements.threadsTotalLabel.textContent = t("threadsTotal");
   elements.threadsActiveLabel.textContent = t("threadsActive");
@@ -1019,7 +1118,12 @@ function applyLanguage() {
   elements.settingsChatgptProviderTitle.textContent = PROVIDERS.chatgpt.label;
   elements.settingsAppearanceTitle.textContent = t("appearance");
   elements.settingsChartTitle.textContent = t("chart");
+  elements.settingsDataTitle.textContent = t("dataAndCache");
   elements.settingsUpdateTitle.textContent = t("updates");
+  elements.scanProviderLabel.textContent = t("scanProvider");
+  elements.latestScanLabel.textContent = t("latestScan");
+  elements.cacheManagementLabel.textContent = t("scanCache");
+  elements.rebuildCacheButton.textContent = cacheRebuildInProgress ? t("rebuildingCache") : t("rebuildCache");
   for (const label of elements.providerEnabledLabels) {
     label.textContent = t("providerEnabled");
   }
@@ -1071,6 +1175,7 @@ function applyLanguage() {
   elements.postponeUpdateButton.textContent = t("later");
   elements.installUpdateButton.textContent = updateInstalling ? t("installingUpdate") : t("installNow");
   renderProviderVisibility();
+  renderScanDiagnostics();
   renderUpdateSurfaces();
   activateSettingsNav(activeSettingsSectionId);
   setView(currentView);
@@ -1185,6 +1290,7 @@ function settingsPanelGroupTitle(sectionId) {
     "settingsGeneralSection",
     "settingsAppearanceSection",
     "settingsChartSection",
+    "settingsDataSection",
     "settingsUpdateSection"
   ].includes(sectionId)
     ? t("personal")
@@ -1227,6 +1333,7 @@ function setLoading(isLoading) {
   elements.chooseCopilotHomeButton.disabled = isLoading || !isProviderEnabled("copilot");
   elements.chooseCursorHomeButton.disabled = isLoading || !isProviderEnabled("cursor");
   elements.chooseChatgptHomeButton.disabled = isLoading || !isProviderEnabled("chatgpt");
+  elements.rebuildCacheButton.disabled = isLoading || cacheRebuildInProgress;
   elements.refreshButton.classList.toggle("loading", isLoading);
 }
 
@@ -1334,17 +1441,13 @@ function renderStatsSkeleton(providerId = currentSettings.activeProvider) {
   elements.overviewAccountName.textContent = provider.label;
   elements.overviewAccountPlan.textContent = provider.label;
   applyProviderEstimateText(providerId);
-  renderCostMetricLabels(chartDays, {
-    featured: {
-      costAvailable: providerId === "codex"
-    }
-  });
+  renderCostMetricLabels(chartDays);
   elements.periodTokensLabel.textContent = t("periodTokens", { days: chartDays });
   elements.periodUsagePercent.dataset.periodLabel = t("periodAccumulated", { days: chartDays });
   elements.activityTitle.textContent = t("activityTrend", { days: chartDays });
   elements.overviewPeriod.textContent = t("daysPeriod", { days: chartDays });
   elements.periodTokens.closest(".hero-metric")?.style.setProperty("--usage-progress", "0%");
-  updateLatestTokenUsageMeter(0);
+  updateTodayTokensMeter(0);
   elements.accountInitials.textContent = provider.initials;
   elements.accountName.textContent = provider.label;
   markSkeleton(elements.accountPlan, "64px");
@@ -1353,7 +1456,7 @@ function renderStatsSkeleton(providerId = currentSettings.activeProvider) {
   markSkeleton(elements.periodUsagePercent, "110px");
   markSkeleton(elements.periodTokens, "78px");
   markSkeleton(elements.periodTokensContext, "172px");
-  markSkeleton(elements.latestTokenUsage, "72px");
+  markSkeleton(elements.todayTokens, "72px");
   markSkeleton(elements.threadsTotal, "48px");
   markSkeleton(elements.threadsActive, "48px");
   markSkeleton(elements.tokensTotal, "64px");
@@ -1405,6 +1508,7 @@ function renderSettings() {
     button.classList.toggle("active", Number(button.dataset.days) === Number(currentSettings.chartDays));
   }
   renderSettingsStatus();
+  renderScanDiagnostics();
   applyTheme(currentSettings.theme);
   applyLanguage();
   setLoading(currentLoading);
@@ -1635,7 +1739,7 @@ function renderStats(stats) {
   elements.periodUsagePercent.dataset.periodLabel = t("periodAccumulated", { days: chartDays });
   elements.activityTitle.textContent = t("activityTrend", { days: chartDays });
   elements.overviewPeriod.textContent = t("daysPeriod", { days: chartDays });
-  renderCostMetricLabels(chartDays, stats);
+  renderCostMetricLabels(chartDays);
   renderCostMetricValues(stats);
   elements.periodTokensContext.textContent = t("periodTokenContext", {
     total: formatCompact(stats.totals.totalTokens),
@@ -1656,8 +1760,8 @@ function renderStats(stats) {
     ? formatLimitMeta(mainLimit)
     : t("waitingForLogs", { provider: provider.label });
   elements.periodTokens.textContent = formatCompact(stats.featured.periodTokens);
-  elements.latestTokenUsage.textContent = formatCompact(stats.featured.latestTokenUsage);
-  updateLatestTokenUsageMeter(statsRatioPercent(stats.featured.latestTokenUsage, stats.featured.periodTokens));
+  elements.todayTokens.textContent = formatCompact(stats.featured.todayTokens);
+  updateTodayTokensMeter(statsRatioPercent(stats.featured.todayTokens, stats.featured.periodTokens));
 
   elements.threadsTotal.textContent = formatCompact(stats.totals.threads);
   elements.threadsActive.textContent = formatCompact(stats.totals.activeThreads);
@@ -1706,6 +1810,7 @@ async function refreshStats(options = {}) {
     }
     cacheStats(providerId, stats);
     renderStats(stats);
+    await refreshScanDiagnostics();
   } catch (error) {
     if (requestId !== latestStatsRequestId) {
       return;
@@ -1716,6 +1821,39 @@ async function refreshStats(options = {}) {
     if (requestId === latestStatsRequestId && showLoading) {
       setLoading(false);
     }
+  }
+}
+
+async function rebuildCurrentProviderCache() {
+  if (cacheRebuildInProgress) {
+    return;
+  }
+
+  const providerId = currentSettings.activeProvider;
+  cacheRebuildInProgress = true;
+  cacheRebuildResult = null;
+  latestStatsRequestId += 1;
+  setLoading(true);
+  renderScanDiagnostics();
+
+  try {
+    const stats = await aiUsage.rebuildStatsCache(providerId);
+    cacheStats(providerId, stats);
+    if (providerId === currentSettings.activeProvider) {
+      renderStats(stats);
+    }
+    await refreshScanDiagnostics();
+    cacheRebuildResult = { provider: providerId, error: "" };
+  } catch (error) {
+    cacheRebuildResult = {
+      provider: providerId,
+      error: error.message || t("cacheRebuildError")
+    };
+  } finally {
+    cacheRebuildInProgress = false;
+    setLoading(false);
+    renderScanDiagnostics();
+    resetAutoRefreshTimer();
   }
 }
 
@@ -1811,6 +1949,7 @@ async function chooseHome(providerId) {
       renderSettings();
       cacheStats(providerId, result.stats);
       renderStats(result.stats);
+      await refreshScanDiagnostics();
       resetAutoRefreshTimer();
     }
   } catch (error) {
@@ -1879,6 +2018,7 @@ elements.homeButton.addEventListener("click", () => setView("home"));
 elements.settingsBackButton.addEventListener("click", () => setView("home"));
 elements.repositoryLink.addEventListener("click", (event) => openProjectLink(event, REPOSITORY_URL));
 elements.issueLink.addEventListener("click", (event) => openProjectLink(event, ISSUE_URL));
+elements.rebuildCacheButton.addEventListener("click", rebuildCurrentProviderCache);
 elements.chooseCodexHomeButton.addEventListener("click", () => chooseHome("codex"));
 elements.chooseClaudeHomeButton.addEventListener("click", () => chooseHome("claude"));
 elements.chooseCopilotHomeButton.addEventListener("click", () => chooseHome("copilot"));

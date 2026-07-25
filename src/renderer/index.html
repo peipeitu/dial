@@ -136,16 +136,16 @@
                 <strong id="periodCost">-</strong>
               </article>
               <article class="hero-metric compact">
-                <span id="latestTokenUsageLabel">最近 token 用量</span>
-                <strong id="latestTokenUsage">-</strong>
+                <span id="todayTokensLabel">今日 token 用量</span>
+                <strong id="todayTokens">-</strong>
                 <div
-                  id="latestTokenUsageMeter"
+                  id="todayTokensMeter"
                   class="hero-meter subtle"
                   role="progressbar"
                   aria-valuemin="0"
                   aria-valuemax="100"
                   aria-valuenow="0"
-                  aria-label="最近 token 占当前周期 token 的比例"
+                  aria-label="今日 token 占当前周期 token 的比例"
                 ></div>
               </article>
             </section>
@@ -242,6 +242,10 @@
                 <button class="settings-nav-item" type="button" data-settings-section="settingsChartSection">
                   <span aria-hidden="true">◷</span>
                   <span id="settingsChartNavLabel">图表</span>
+                </button>
+                <button class="settings-nav-item" type="button" data-settings-section="settingsDataSection">
+                  <span aria-hidden="true">▤</span>
+                  <span id="settingsDataNavLabel">数据与缓存</span>
                 </button>
 
                 <button class="settings-nav-item" type="button" data-settings-section="settingsUpdateSection">
@@ -399,6 +403,32 @@
                         </label>
                       </div>
                     </label>
+                  </div>
+                </section>
+
+                <section id="settingsDataSection" class="settings-section">
+                  <div class="settings-section-heading">
+                    <h3 id="settingsDataTitle">数据与缓存</h3>
+                  </div>
+                  <div class="settings-group">
+                    <div class="setting-row">
+                      <span id="scanProviderLabel">当前服务</span>
+                      <code id="scanProviderValue" class="setting-inline-value">Codex</code>
+                    </div>
+                    <div class="setting-row">
+                      <span id="latestScanLabel">最近扫描</span>
+                      <div class="setting-control scan-diagnostics-control">
+                        <strong id="scanDiagnosticsSummary">刷新后显示</strong>
+                        <small id="scanDiagnosticsMeta">-</small>
+                      </div>
+                    </div>
+                    <div class="setting-row">
+                      <span id="cacheManagementLabel">扫描缓存</span>
+                      <div class="setting-control cache-setting-control">
+                        <span id="rebuildCacheStatus" class="setting-status-text" role="status" aria-live="polite">-</span>
+                        <button id="rebuildCacheButton" class="secondary-button" type="button">重建缓存</button>
+                      </div>
+                    </div>
                   </div>
                 </section>
 
