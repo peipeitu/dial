@@ -193,7 +193,9 @@ test("scan diagnostics render the active provider cache result", () => {
         parsedFiles: 2,
         deletedFiles: 1,
         failedFiles: 0,
-        cacheHitRate: 80
+        cacheHitRate: 80,
+        cacheWriteSucceeded: true,
+        cacheWriteSkipped: false
       }];
       renderScanDiagnostics();
     `,
@@ -204,4 +206,79 @@ test("scan diagnostics render the active provider cache result", () => {
   assert.equal(elements.get("scanDiagnosticsSummary").textContent, "42 ms · 命中 8/10（80%）");
   assert.equal(elements.get("scanDiagnosticsMeta").textContent, "重新解析 2 · 删除 1 · 失败 0");
   assert.equal(elements.get("rebuildCacheStatus").textContent, "缓存运行正常");
+});
+
+test("cache rebuild does not report success when failed files skip the cache write", () => {
+  const { context, elements } = loadRenderer();
+
+  vm.runInContext(
+    `
+      currentSettings.language = "zh";
+      currentSettings.activeProvider = "codex";
+      scanDiagnostics = [{
+        provider: "codex",
+        elapsedMs: 42,
+        totalFiles: 10,
+        cacheHits: 0,
+        parsedFiles: 9,
+        deletedFiles: 0,
+        failedFiles: 1,
+        cacheHitRate: 0,
+        cacheWriteSucceeded: true,
+        cacheWriteSkipped: true
+      }];
+      cacheRebuildResult = {
+        provider: "codex",
+        error: "",
+        problem: scanDiagnosticsProblem(scanDiagnostics[0])
+      };
+      renderScanDiagnostics();
+    `,
+    context
+  );
+
+  assert.equal(
+    elements.get("rebuildCacheStatus").textContent,
+    "扫描有 1 个失败文件，已跳过缓存写入"
+  );
+});
+
+test("cache rebuild reports cache write and diagnostics verification failures", () => {
+  const { context, elements } = loadRenderer();
+
+  vm.runInContext(
+    `
+      currentSettings.language = "zh";
+      currentSettings.activeProvider = "codex";
+      cacheRebuildResult = {
+        provider: "codex",
+        error: "",
+        problem: scanDiagnosticsProblem({
+          provider: "codex",
+          failedFiles: 0,
+          cacheWriteSucceeded: false,
+          cacheWriteSkipped: false
+        })
+      };
+      renderScanDiagnostics();
+    `,
+    context
+  );
+  assert.equal(elements.get("rebuildCacheStatus").textContent, "扫描完成，但缓存写入失败");
+
+  vm.runInContext(
+    `
+      cacheRebuildResult = {
+        provider: "codex",
+        error: "",
+        problem: scanDiagnosticsProblem(null)
+      };
+      renderScanDiagnostics();
+    `,
+    context
+  );
+  assert.equal(
+    elements.get("rebuildCacheStatus").textContent,
+    "统计已刷新，但无法确认缓存重建结果"
+  );
 });

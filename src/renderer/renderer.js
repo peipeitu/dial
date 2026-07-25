@@ -241,10 +241,13 @@ const I18N = {
     scanMeta: "重新解析 {parsed} · 删除 {deleted} · 失败 {failed}",
     scanCacheReady: "缓存运行正常",
     scanCompletedWithFailures: "扫描完成，{count} 个文件失败",
+    cacheWriteSkipped: "扫描有 {count} 个失败文件，已跳过缓存写入",
+    cacheWriteFailed: "扫描完成，但缓存写入失败",
     rebuildCache: "重建缓存",
     rebuildingCache: "正在重建",
     cacheRebuildComplete: "缓存已重建，统计已刷新",
     cacheRebuildError: "无法重建缓存",
+    cacheRebuildUnverified: "统计已刷新，但无法确认缓存重建结果",
     dataFolder: "数据目录",
     chooseFolder: "选择目录",
     language: "语言",
@@ -364,10 +367,13 @@ const I18N = {
     scanMeta: "{parsed} parsed · {deleted} deleted · {failed} failed",
     scanCacheReady: "Cache is working",
     scanCompletedWithFailures: "Scan completed with {count} failed files",
+    cacheWriteSkipped: "{count} files failed to scan; cache write was skipped",
+    cacheWriteFailed: "Scan completed, but the cache could not be written",
     rebuildCache: "Rebuild cache",
     rebuildingCache: "Rebuilding",
     cacheRebuildComplete: "Cache rebuilt and stats refreshed",
     cacheRebuildError: "Unable to rebuild cache",
+    cacheRebuildUnverified: "Stats refreshed, but the cache rebuild result could not be verified",
     dataFolder: "Data folder",
     chooseFolder: "Choose folder",
     language: "Language",
@@ -948,8 +954,43 @@ function renderSettingsStatus() {
   elements.settingsStatus.textContent = t("settingsSavedAt", { time: formatTime(settingsSavedAt) });
 }
 
+function scanDiagnosticsForProvider(providerId) {
+  return scanDiagnostics.find((diagnostics) => diagnostics.provider === providerId) || null;
+}
+
 function activeScanDiagnostics() {
-  return scanDiagnostics.find((diagnostics) => diagnostics.provider === currentSettings.activeProvider) || null;
+  return scanDiagnosticsForProvider(currentSettings.activeProvider);
+}
+
+function scanDiagnosticsProblem(diagnostics) {
+  if (!diagnostics) {
+    return { kind: "unverified", failedFiles: 0 };
+  }
+  const failedFiles = Number(diagnostics.failedFiles) || 0;
+  if (diagnostics.cacheWriteSkipped) {
+    return { kind: "write-skipped", failedFiles };
+  }
+  if (diagnostics.cacheWriteSucceeded === false) {
+    return { kind: "write-failed", failedFiles };
+  }
+  if (failedFiles > 0) {
+    return { kind: "scan-failed", failedFiles };
+  }
+  return null;
+}
+
+function scanDiagnosticsProblemText(problem, isRebuildResult = false) {
+  if (!problem) return "";
+  if (problem.kind === "write-skipped") {
+    return t("cacheWriteSkipped", { count: formatNumber(problem.failedFiles) });
+  }
+  if (problem.kind === "write-failed") {
+    return t("cacheWriteFailed");
+  }
+  if (problem.kind === "scan-failed") {
+    return t("scanCompletedWithFailures", { count: formatNumber(problem.failedFiles) });
+  }
+  return isRebuildResult ? t("cacheRebuildUnverified") : "";
 }
 
 function renderScanDiagnostics() {
@@ -976,16 +1017,19 @@ function renderScanDiagnostics() {
     elements.scanDiagnosticsMeta.textContent = "-";
   }
 
+  const diagnosticsProblem =
+    rebuildResult?.problem || (diagnostics ? scanDiagnosticsProblem(diagnostics) : null);
   if (cacheRebuildInProgress) {
     elements.rebuildCacheStatus.textContent = t("rebuildingCache");
   } else if (rebuildResult?.error) {
     elements.rebuildCacheStatus.textContent = rebuildResult.error;
+  } else if (diagnosticsProblem) {
+    elements.rebuildCacheStatus.textContent = scanDiagnosticsProblemText(
+      diagnosticsProblem,
+      Boolean(rebuildResult)
+    );
   } else if (rebuildResult) {
     elements.rebuildCacheStatus.textContent = t("cacheRebuildComplete");
-  } else if (Number(diagnostics?.failedFiles) > 0) {
-    elements.rebuildCacheStatus.textContent = t("scanCompletedWithFailures", {
-      count: formatNumber(diagnostics.failedFiles)
-    });
   } else {
     elements.rebuildCacheStatus.textContent = diagnostics ? t("scanCacheReady") : "-";
   }
@@ -998,10 +1042,13 @@ async function refreshScanDiagnostics() {
   try {
     const diagnostics = await aiUsage.getScanDiagnostics();
     scanDiagnostics = Array.isArray(diagnostics) ? diagnostics : [];
+    renderScanDiagnostics();
+    return true;
   } catch {
     scanDiagnostics = [];
+    renderScanDiagnostics();
+    return false;
   }
-  renderScanDiagnostics();
 }
 
 function updateTodayTokensMeter(percent) {
@@ -1842,8 +1889,13 @@ async function rebuildCurrentProviderCache() {
     if (providerId === currentSettings.activeProvider) {
       renderStats(stats);
     }
-    await refreshScanDiagnostics();
-    cacheRebuildResult = { provider: providerId, error: "" };
+    const diagnosticsLoaded = await refreshScanDiagnostics();
+    const diagnostics = diagnosticsLoaded ? scanDiagnosticsForProvider(providerId) : null;
+    cacheRebuildResult = {
+      provider: providerId,
+      error: "",
+      problem: scanDiagnosticsProblem(diagnostics)
+    };
   } catch (error) {
     cacheRebuildResult = {
       provider: providerId,
