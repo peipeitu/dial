@@ -1,7 +1,28 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 const { releaseMutationPolicy } = require("../scripts/release-policy.js");
+
+test("release state probe preserves the false default when no release exists", () => {
+  const workflow = fs.readFileSync(
+    path.join(__dirname, "..", ".github", "workflows", "build.yml"),
+    "utf8",
+  );
+  const inspectReleaseState = workflow
+    .split("- name: Inspect release state")[1]
+    .split("- name: Verify existing published release")[0];
+
+  assert.doesNotMatch(
+    inspectReleaseState,
+    /if release_is_draft=\$\(gh release view "\$RELEASE_TAG"/,
+  );
+  assert.match(
+    inspectReleaseState,
+    /if queried_release_is_draft=\$\(gh release view "\$RELEASE_TAG"[\s\S]*release_is_draft="\$queried_release_is_draft"/,
+  );
+});
 
 test("release policy creates a missing release", () => {
   assert.deepEqual(
