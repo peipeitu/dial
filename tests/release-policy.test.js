@@ -24,6 +24,25 @@ test("release state probe preserves the false default when no release exists", (
   );
 });
 
+test("preflight defers an invisible repair target to the write-capable release job", () => {
+  const workflow = fs.readFileSync(
+    path.join(__dirname, "..", ".github", "workflows", "build.yml"),
+    "utf8",
+  );
+  const validateRepairTarget = workflow
+    .split("- name: Validate release ordering and repair target")[1]
+    .split("- name: Require updater signing for tagged releases")[0];
+
+  assert.doesNotMatch(
+    validateRepairTarget,
+    /::error::Release repair requires an existing release/,
+  );
+  assert.match(
+    validateRepairTarget,
+    /Repair target visibility and existence will be validated by the Release job/,
+  );
+});
+
 test("release policy creates a missing release", () => {
   assert.deepEqual(
     releaseMutationPolicy({ exists: false, isDraft: false, repair: false }),

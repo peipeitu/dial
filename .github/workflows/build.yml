@@ -111,14 +111,15 @@ jobs:
             fi
           fi
           if [[ "$REPAIR_RELEASE" == "true" ]]; then
-            if ! release_is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft'); then
-              echo "::error::Release repair requires an existing release."
-              exit 1
-            fi
-            if [[ "$release_is_draft" == "true" ]]; then
-              node scripts/check-release.js --root "$SOURCE_DIR" --tag "$RELEASE_TAG" --latest-tag "$latest_tag"
+            if release_is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null); then
+              if [[ "$release_is_draft" == "true" ]]; then
+                node scripts/check-release.js --root "$SOURCE_DIR" --tag "$RELEASE_TAG" --latest-tag "$latest_tag"
+              else
+                node scripts/check-release.js --root "$SOURCE_DIR" --tag "$RELEASE_TAG" --latest-tag "$latest_tag" --require-latest
+              fi
             else
-              node scripts/check-release.js --root "$SOURCE_DIR" --tag "$RELEASE_TAG" --latest-tag "$latest_tag" --require-latest
+              echo "Repair target visibility and existence will be validated by the Release job."
+              node scripts/check-release.js --root "$SOURCE_DIR" --tag "$RELEASE_TAG" --latest-tag "$latest_tag"
             fi
           else
             node scripts/check-release.js --root "$SOURCE_DIR" --tag "$RELEASE_TAG" --latest-tag "$latest_tag"
