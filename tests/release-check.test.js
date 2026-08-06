@@ -11,14 +11,14 @@ const root = path.resolve(__dirname, "..");
 const script = path.join(root, "scripts", "check-release.js");
 
 function releaseFixture(t, versions = {}) {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "ai-usage-release-check-"));
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "dial-release-check-"));
   t.after(() => fs.rmSync(fixture, { recursive: true, force: true }));
   fs.mkdirSync(path.join(fixture, "src-tauri"), { recursive: true });
 
   const version = versions.packageJson || "1.2.3";
   fs.writeFileSync(
     path.join(fixture, "package.json"),
-    JSON.stringify({ name: "ai-usage", version }),
+    JSON.stringify({ name: "dial", version }),
   );
   fs.writeFileSync(
     path.join(fixture, "package-lock.json"),
@@ -29,11 +29,11 @@ function releaseFixture(t, versions = {}) {
   );
   fs.writeFileSync(
     path.join(fixture, "src-tauri", "Cargo.toml"),
-    `[package]\nname = "ai-usage"\nversion = "${versions.cargoToml || version}"\n\n[dependencies]\n`,
+    `[package]\nname = "dial"\nversion = "${versions.cargoToml || version}"\n\n[dependencies]\n`,
   );
   fs.writeFileSync(
     path.join(fixture, "src-tauri", "Cargo.lock"),
-    `version = 4\n\n[[package]]\nname = "ai-usage"\nversion = "${versions.cargoLock || version}"\n`,
+    `version = 4\n\n[[package]]\nname = "dial"\nversion = "${versions.cargoLock || version}"\n`,
   );
   fs.writeFileSync(
     path.join(fixture, "src-tauri", "tauri.conf.json"),

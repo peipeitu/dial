@@ -5,7 +5,16 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "..");
-const html = fs.readFileSync(path.join(root, "src", "renderer", "index.html"), "utf8");
+const rendererRoot = path.join(root, "src", "renderer");
+const componentSources = fs
+  .readdirSync(path.join(rendererRoot, "components"))
+  .filter((file) => file.endsWith(".vue"))
+  .map((file) => fs.readFileSync(path.join(rendererRoot, "components", file), "utf8"));
+const rendererMarkup = [
+  fs.readFileSync(path.join(rendererRoot, "index.html"), "utf8"),
+  fs.readFileSync(path.join(rendererRoot, "App.vue"), "utf8"),
+  ...componentSources
+].join("\n");
 const rendererSource = fs
   .readFileSync(path.join(root, "src", "renderer", "renderer.js"), "utf8")
   .replace(/\nboot\(\);\s*$/, "\n");
@@ -113,13 +122,37 @@ function loadRenderer() {
 }
 
 test("every renderer element id exists in the HTML shell", () => {
-  const htmlIds = new Set(Array.from(html.matchAll(/\bid="([^"]+)"/g), (match) => match[1]));
+  const htmlIds = new Set(Array.from(rendererMarkup.matchAll(/\bid="([^"]+)"/g), (match) => match[1]));
+  for (const match of rendererMarkup.matchAll(/\b(?:section|navLabelId|titleId|enableId|homeLabelId|homeValueId|chooseId):\s*"([^"]+)"/g)) {
+    htmlIds.add(match[1]);
+  }
   const rendererIds = new Set(
     Array.from(rendererSource.matchAll(/document\.getElementById\("([^"]+)"\)/g), (match) => match[1])
   );
   const missing = Array.from(rendererIds).filter((id) => !htmlIds.has(id));
 
   assert.deepEqual(missing, []);
+});
+
+test("quota charts wait for official history instead of using recent thread totals", () => {
+  const { context } = loadRenderer();
+
+  const result = JSON.parse(
+    vm.runInContext(
+      `JSON.stringify(buildRateLimitHistoryPending({
+        rateLimits: {
+          windows: [{ windowMinutes: 300, usedPercent: 42, resetsAt: new Date(Date.now() + 60_000).toISOString() }]
+        },
+        latestThreads: [{ updatedAt: new Date().toISOString(), tokensUsed: 999999 }]
+      }, 300))`,
+      context
+    )
+  );
+
+  assert.ok(result.items.every((item) => item.value === 0));
+  assert.equal(result.sourceLabel, "官方额度快照");
+  assert.match(result.interpretation, /只有最新额度快照/);
+  assert.equal(result.legend.length, 1);
 });
 
 test("today token metric uses today's total and period share", () => {
@@ -136,6 +169,17 @@ test("today token metric uses today's total and period share", () => {
   assert.equal(elements.get("todayTokens").textContent, "1.5K");
   assert.equal(elements.get("todayTokensMeter").style.getPropertyValue("--today-token-progress"), "15%");
   assert.equal(elements.get("todayTokensMeter").getAttribute("aria-valuenow"), "15");
+});
+
+test("explicit dark theme is applied to the renderer body", () => {
+  const { context } = loadRenderer();
+
+  const theme = vm.runInContext(
+    `applyTheme("dark"); document.body.dataset.theme`,
+    context
+  );
+
+  assert.equal(theme, "dark");
 });
 
 test("darwin uses macOS provider defaults instead of Windows paths", () => {

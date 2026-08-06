@@ -9,11 +9,11 @@ const root = path.resolve(__dirname, "..");
 const script = path.join(root, "scripts", "write-latest-json.js");
 
 function artifactFixture(t) {
-  const artifactsDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-usage-updater-"));
+  const artifactsDir = fs.mkdtempSync(path.join(os.tmpdir(), "dial-updater-"));
   t.after(() => fs.rmSync(artifactsDir, { recursive: true, force: true }));
 
-  const windowsInstaller = path.join(artifactsDir, "AI Usage_1.2.3_x64-setup.exe");
-  const linuxAppImage = path.join(artifactsDir, "AI Usage_1.2.3_amd64.AppImage");
+  const windowsInstaller = path.join(artifactsDir, "Dial_1.2.3_x64-setup.exe");
+  const linuxAppImage = path.join(artifactsDir, "Dial_1.2.3_amd64.AppImage");
 
   fs.writeFileSync(windowsInstaller, "windows installer");
   fs.writeFileSync(`${windowsInstaller}.sig`, "windows signature");
@@ -52,11 +52,11 @@ test("updater manifest uses GitHub's normalized release asset names", (t) => {
 
   assert.equal(
     manifest.platforms["windows-x86_64"].url,
-    "https://github.com/owner/repo/releases/download/v1.2.3/AI.Usage_1.2.3_x64-setup.exe",
+    "https://github.com/owner/repo/releases/download/v1.2.3/Dial_1.2.3_x64-setup.exe",
   );
   assert.equal(
     manifest.platforms["linux-x86_64"].url,
-    "https://github.com/owner/repo/releases/download/v1.2.3/AI.Usage_1.2.3_amd64.AppImage",
+    "https://github.com/owner/repo/releases/download/v1.2.3/Dial_1.2.3_amd64.AppImage",
   );
   assert.equal(manifest.platforms["windows-x86_64"].signature, "windows signature");
   assert.equal(manifest.platforms["linux-x86_64"].signature, "linux signature");

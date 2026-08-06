@@ -1,0 +1,104 @@
+<svg width="1742" height="760" viewBox="0 0 1742 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1742" height="760" fill="#F7F8FA"/>
+
+  <defs>
+    <filter id="softShadow" x="-20%" y="-30%" width="140%" height="170%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#283039" flood-opacity="0.08"/>
+    </filter>
+    <filter id="tightShadow" x="-18%" y="-28%" width="136%" height="156%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#283039" flood-opacity="0.075"/>
+    </filter>
+    <linearGradient id="primaryFill" x1="60" y1="126" x2="60" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EDF7FD"/>
+      <stop offset="0.58" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- top status -->
+  <g transform="translate(34 26)">
+    <circle cx="20" cy="20" r="16" stroke="#6D737C" stroke-width="3"/>
+    <path d="M20 8.5L29.8 14.2V25.8L20 31.5L10.2 25.8V14.2L20 8.5Z" stroke="#6D737C" stroke-width="2.4"/>
+    <text x="62" y="26" fill="#A0A7B2" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700">数据源</text>
+    <text x="140" y="27" fill="#252A32" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="760">Codex</text>
+    <line x1="270" y1="7" x2="270" y2="33" stroke="#E3E7EC" stroke-width="2"/>
+    <text x="300" y="27" fill="#A0A7B2" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700">近 30 天</text>
+    <text x="420" y="27" fill="#7B8491" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700">本地日志估算</text>
+    <text x="1505" y="27" text-anchor="end" fill="#B2B8C2" font-family="Inter, Arial, sans-serif" font-size="23" font-weight="700">peipei tu</text>
+    <text x="1552" y="27" text-anchor="end" fill="#252A32" font-family="Inter, Arial, sans-serif" font-size="23" font-weight="760">Pro</text>
+  </g>
+
+  <!-- main balanced metrics -->
+  <g filter="url(#softShadow)">
+    <rect x="32" y="92" width="704" height="328" rx="8" fill="url(#primaryFill)" stroke="#DFE5EB"/>
+  </g>
+  <text x="62" y="148" fill="#66707D" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="760">近 30 天 token 用量</text>
+  <text x="62" y="257" fill="#202329" font-family="Inter, Arial, sans-serif" font-size="94" font-weight="780">513M</text>
+  <text x="62" y="305" fill="#68707D" font-family="Inter, Arial, sans-serif" font-size="23" font-weight="650">总 token 565M · 最近 9.4M</text>
+  <g transform="translate(62 350)">
+    <rect x="0" y="0" width="632" height="7" rx="3.5" fill="#EEF2F5"/>
+    <rect x="0" y="0" width="574" height="7" rx="3.5" fill="#2980B9"/>
+    <text x="0" y="39" fill="#8C95A1" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="620">30 天累计</text>
+    <text x="632" y="39" text-anchor="end" fill="#68707D" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="680">513% Pro 使用量</text>
+  </g>
+
+  <g filter="url(#tightShadow)">
+    <rect x="760" y="92" width="450" height="156" rx="8" fill="#FFFFFF" stroke="#DFE5EB"/>
+  </g>
+  <text x="790" y="148" fill="#66707D" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="760">今日费用</text>
+  <text x="790" y="221" fill="#202329" font-family="Inter, Arial, sans-serif" font-size="58" font-weight="780">$9.40</text>
+  <text x="1120" y="221" text-anchor="end" fill="#8C95A1" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="650">Today</text>
+
+  <g filter="url(#tightShadow)">
+    <rect x="1236" y="92" width="450" height="156" rx="8" fill="#FFFFFF" stroke="#DFE5EB"/>
+  </g>
+  <text x="1266" y="148" fill="#66707D" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="760">近 30 天费用</text>
+  <text x="1266" y="221" fill="#202329" font-family="Inter, Arial, sans-serif" font-size="58" font-weight="780">$513.23</text>
+  <text x="1588" y="221" text-anchor="end" fill="#8C95A1" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="650">Period</text>
+
+  <g filter="url(#tightShadow)">
+    <rect x="760" y="272" width="926" height="148" rx="8" fill="#FFFFFF" stroke="#DFE5EB"/>
+  </g>
+  <text x="790" y="329" fill="#66707D" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="760">最近 token 用量</text>
+  <text x="790" y="393" fill="#202329" font-family="Inter, Arial, sans-serif" font-size="54" font-weight="780">9.4M</text>
+  <g transform="translate(1030 326)">
+    <rect x="0" y="0" width="594" height="8" rx="4" fill="#EEF2F5"/>
+    <rect x="0" y="0" width="382" height="8" rx="4" fill="#85C1E9"/>
+    <text x="0" y="42" fill="#8C95A1" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="620">来自最近一次记录，弱化为辅助指标</text>
+  </g>
+
+  <!-- compact summary strip -->
+  <g filter="url(#tightShadow)">
+    <rect x="32" y="456" width="1654" height="112" rx="8" fill="#FFFFFF" stroke="#DFE5EB"/>
+  </g>
+  <g transform="translate(62 489)">
+    <text x="0" y="0" fill="#66707D" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="740">总会话</text>
+    <text x="0" y="54" fill="#202329" font-family="Inter, Arial, sans-serif" font-size="44" font-weight="760">188</text>
+    <line x1="354" y1="-12" x2="354" y2="64" stroke="#E5E9EE" stroke-width="2"/>
+    <text x="418" y="0" fill="#66707D" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="740">活跃</text>
+    <text x="418" y="54" fill="#202329" font-family="Inter, Arial, sans-serif" font-size="44" font-weight="760">143</text>
+    <line x1="772" y1="-12" x2="772" y2="64" stroke="#E5E9EE" stroke-width="2"/>
+    <text x="836" y="0" fill="#66707D" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="740">总 token</text>
+    <text x="836" y="54" fill="#202329" font-family="Inter, Arial, sans-serif" font-size="44" font-weight="760">565M</text>
+    <line x1="1190" y1="-12" x2="1190" y2="64" stroke="#E5E9EE" stroke-width="2"/>
+    <text x="1254" y="0" fill="#66707D" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="740">近 7 天更新</text>
+    <text x="1254" y="54" fill="#202329" font-family="Inter, Arial, sans-serif" font-size="44" font-weight="760">136</text>
+  </g>
+
+  <!-- hint of next section -->
+  <g filter="url(#tightShadow)" opacity="0.72">
+    <rect x="32" y="604" width="1654" height="132" rx="8" fill="#FFFFFF" stroke="#DFE5EB"/>
+  </g>
+  <text x="62" y="648" fill="#66707D" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="740">近 30 天趋势</text>
+  <g transform="translate(62 680)">
+    <rect x="0" y="18" width="36" height="28" rx="4" fill="#D6EAF8"/>
+    <rect x="52" y="4" width="36" height="42" rx="4" fill="#85C1E9"/>
+    <rect x="104" y="24" width="36" height="22" rx="4" fill="#D6EAF8"/>
+    <rect x="156" y="-14" width="36" height="60" rx="4" fill="#2980B9"/>
+    <rect x="208" y="10" width="36" height="36" rx="4" fill="#85C1E9"/>
+    <rect x="260" y="30" width="36" height="16" rx="4" fill="#D6EAF8"/>
+    <rect x="312" y="-2" width="36" height="48" rx="4" fill="#85C1E9"/>
+    <rect x="364" y="17" width="36" height="29" rx="4" fill="#D6EAF8"/>
+    <rect x="416" y="-8" width="36" height="54" rx="4" fill="#2980B9"/>
+  </g>
+</svg>

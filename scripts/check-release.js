@@ -23,10 +23,10 @@ function packageSectionVersion(content, fileName) {
 function cargoLockVersion(content) {
   const section = content
     .split(/\n(?=\[\[package\]\]\n)/)
-    .find((candidate) => /^name\s*=\s*"ai-usage"\s*$/m.test(candidate));
+    .find((candidate) => /^name\s*=\s*"dial"\s*$/m.test(candidate));
   const version = section?.match(/^version\s*=\s*"([^"]+)"\s*$/m)?.[1];
   if (!version) {
-    throw new Error("Unable to read ai-usage version from src-tauri/Cargo.lock.");
+    throw new Error("Unable to read Dial version from src-tauri/Cargo.lock.");
   }
   return version;
 }

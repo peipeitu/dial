@@ -1,7 +1,7 @@
 const tauriCore = window.__TAURI__?.core;
 const tauriWindow = window.__TAURI__?.window;
-const REPOSITORY_URL = "https://github.com/peipeitu/ai-usage";
-const ISSUE_URL = "https://github.com/peipeitu/ai-usage/issues";
+const REPOSITORY_URL = "https://github.com/peipeitu/dial";
+const ISSUE_URL = "https://github.com/peipeitu/dial/issues";
 const MIN_CHART_DAYS = 7;
 const DEFAULT_CHART_DAYS = 30;
 const MAX_CHART_DAYS = 90;
@@ -63,6 +63,8 @@ let currentSettings = {
   autoRefreshMinutes: DEFAULT_AUTO_REFRESH_MINUTES
 };
 let currentView = "home";
+let currentHomeSection = "summary";
+let currentChartMode = "tokens";
 let activeSettingsSectionId = "settingsGeneralSection";
 let lastStats = null;
 let latestStatsRequestId = 0;
@@ -127,46 +129,81 @@ function defaultChatgptHome() {
   return "~/Library/Application Support/com.openai.chat";
 }
 
+const providerAssets = window.__AI_USAGE_ASSETS__ || {};
 const PROVIDERS = {
   codex: {
     label: "Codex",
     initials: "CD",
-    icon: "./assets/provider-codex.svg",
+    icon: providerAssets.codexLight || providerAssets.codex || "./assets/provider-codex-light.svg",
+    darkIcon: providerAssets.codexDark || "./assets/provider-codex-dark.svg",
     defaultHome: "~/.codex"
   },
   claude: {
     label: "Claude Code",
     initials: "CC",
-    icon: "./assets/provider-claude.svg",
+    icon: providerAssets.claude || "./assets/provider-claude.svg",
     defaultHome: "~/.claude"
   },
   copilot: {
     label: "GitHub Copilot",
     initials: "GH",
-    icon: "./assets/provider-copilot.svg",
+    icon: providerAssets.copilot || "./assets/provider-copilot.svg",
     defaultHome: defaultCopilotHome()
   },
   cursor: {
     label: "Cursor",
     initials: "CU",
-    icon: "./assets/provider-cursor.svg",
+    icon: providerAssets.cursor || "./assets/provider-cursor.svg",
     defaultHome: defaultCursorHome()
   },
   chatgpt: {
     label: "ChatGPT",
     initials: "CG",
-    icon: "./assets/provider-chatgpt.svg",
+    icon: providerAssets.chatgpt || "./assets/provider-chatgpt.svg",
     defaultHome: defaultChatgptHome()
   }
 };
 const PROVIDER_IDS = Object.keys(PROVIDERS);
+
+function providerIconUrl(providerId, theme = document.body.dataset.theme) {
+  const provider = PROVIDERS[providerId] || PROVIDERS.codex;
+  return theme === "dark" && provider.darkIcon ? provider.darkIcon : provider.icon;
+}
+
+function setProviderImage(element, providerId) {
+  element.dataset.providerLogo = providerId;
+  element.src = providerIconUrl(providerId);
+}
+
+function syncProviderLogoTheme() {
+  for (const image of document.querySelectorAll("img[data-provider-logo]")) {
+    image.src = providerIconUrl(image.dataset.providerLogo);
+  }
+}
 
 const I18N = {
   zh: {
     brandSubtitle: "用量监控",
     primaryNavigation: "主导航",
     overview: "概览",
+    summary: "摘要",
+    trend: "趋势",
+    activityTab: "活动",
+    switchDataSource: "⌘K 切换数据源",
     settings: "设置",
+    settingsSearch: "搜索设置",
+    settingsSearchResults: "搜索结果",
+    settingsSearchDescription: "显示与“{query}”相关的设置。",
+    settingsNoResults: "未找到相关设置",
+    settingsGeneralTitle: "常规设置",
+    settingsGeneralDescription: "配置应用的基本行为和使用偏好。",
+    settingsAppearanceDescription: "调整界面主题与强调色。",
+    settingsChartDescription: "设置摘要页图表默认展示的时间范围。",
+    settingsDataDescription: "查看扫描缓存状态，并在需要时重建缓存。",
+    settingsUpdateDescription: "查看版本信息并检查可用更新。",
+    settingsProvidersDescription: "选择 AI 服务并管理其本地数据目录。",
+    settingsAppGroup: "应用",
+    settingsExperienceGroup: "使用体验",
     preferences: "偏好设置",
     backToApp: "返回应用",
     personal: "个人",
@@ -182,11 +219,36 @@ const I18N = {
     usage: "用量",
     aiService: "AI 服务",
     remainingUsage: "剩余用量",
+    quotaWindows: "额度窗口",
+    officialQuota: "官方限额",
+    quotaConsumption: "额度消耗",
+    quotaSnapshot: "官方额度快照",
+    localTokenActivity: "本地 token 活动",
+    currentLimitsSafe: "当前两个额度窗口均安全",
+    currentLimitSafe: "当前额度窗口状态安全",
+    waitingLimitData: "等待新的额度快照",
+    limitUnavailable: "暂未提供",
+    estimatedRemainingAtReset: "预计重置时剩余 {percent}%",
+    actualConsumption: "实际消耗",
+    estimatedConsumption: "预计消耗",
+    visibleSnapshotConsumption: "可见额度快照累计消耗 {percent}% · 当前官方已用 {official}%",
+    localTokenSummary: "本地日志记录 {value} token",
+    chartNoHistory: "只有最新额度快照；后续刷新后会逐步形成柱状历史。",
+    chartHelp: "图表说明",
+    chartHelpTitle: "如何阅读图表",
+    chartHelpTokens: "每根柱子表示当天在本机日志中记录的 token 用量。",
+    chartHelpFiveHour: "每根柱子表示 30 分钟内记录到的 5 小时额度消耗。",
+    chartHelpWeekly: "每根柱子表示当天记录到的每周额度消耗。",
+    chartHelpColor: "柱子越高、颜色越深，表示它相对当前图表内其他时段的数据量越大；虚线柱为预测值。",
     periodUsage: "周期用量",
     dataSource: "数据源",
     localEstimate: "本地日志估算",
     localActivityEstimate: "本地活动估算",
     localActivityEstimateHint: "基于本地会话活动推算，不代表 ChatGPT 官方限额。",
+    recentActivity: "近期活动",
+    activityCount: "{count} 次活动",
+    rollingWindow: "滚动统计",
+    localRecordsOnly: "仅统计本地记录",
     todayCost: "今日费用",
     periodCost: "近 {days} 天费用",
     costUnavailable: "暂无可靠定价",
@@ -196,11 +258,27 @@ const I18N = {
     periodAccumulated: "{days} 天累计",
     periodTokenContext: "总 token {total} · 最近 {latest}",
     todayTokenUsageShare: "今日 token 占当前周期 token 的 {percent}%",
-    threadsTotal: "总会话",
+    threadsTotal: "累计会话",
+    threadsTotalHint: "当前数据源本地目录中扫描到的全部会话记录，包括已归档会话，不受图表周期限制。",
+    allLocalRecords: "全部本地记录",
     threadsActive: "活跃",
     tokensTotal: "总 token",
     updatedThisWeek: "近 7 天更新",
     activityTrend: "近 {days} 天趋势",
+    usageInsights: "本期洞察",
+    usageInsightsMeta: "基于本地记录",
+    insightTrendLabel: "近 7 天 token 比前 7 天",
+    insightTrendUp: "用量正在上升",
+    insightTrendDown: "用量有所下降",
+    insightTrendSteady: "用量基本稳定",
+    insightTrendUnavailable: "需要至少 14 天记录",
+    insightPeakLabel: "近 {days} 天用量最高日",
+    insightPeakNote: "是日均的 {ratio} 倍",
+    insightWorkspaceLabel: "最大工作区",
+    insightWorkspaceBalanced: "累计用量分布较均衡",
+    insightWorkspaceConcentrated: "累计用量相对集中",
+    insightNoData: "暂无本地 token 记录",
+    insightWorkspaceHint: "按当前数据源全部本地会话的累计 token 计算。",
     models: "模型",
     sources: "运行来源",
     workspaces: "工作区",
@@ -271,7 +349,6 @@ const I18N = {
     updatedAt: "更新于 {date}",
     updatesIn: "更新 {time}",
     updatingSoon: "即将更新",
-    percentUsage: "{percent}% {plan} 使用量",
     usageEstimated: "按本地日志估算",
     usedUsage: "{percent}% 已使用",
     usageHeadroom: "余量 {percent}%",
@@ -292,7 +369,24 @@ const I18N = {
     brandSubtitle: "Usage monitor",
     primaryNavigation: "Primary navigation",
     overview: "Overview",
+    summary: "Summary",
+    trend: "Trend",
+    activityTab: "Activity",
+    switchDataSource: "⌘K Switch source",
     settings: "Settings",
+    settingsSearch: "Search settings",
+    settingsSearchResults: "Search results",
+    settingsSearchDescription: "Settings related to “{query}”.",
+    settingsNoResults: "No matching settings",
+    settingsGeneralTitle: "General settings",
+    settingsGeneralDescription: "Configure the app's core behavior and preferences.",
+    settingsAppearanceDescription: "Adjust the interface theme and accent color.",
+    settingsChartDescription: "Set the default time range for overview charts.",
+    settingsDataDescription: "Review scan cache status and rebuild it when needed.",
+    settingsUpdateDescription: "Review version information and check for updates.",
+    settingsProvidersDescription: "Choose AI services and manage their local data folders.",
+    settingsAppGroup: "App",
+    settingsExperienceGroup: "Experience",
     preferences: "Preferences",
     backToApp: "Back to app",
     personal: "Personal",
@@ -308,11 +402,36 @@ const I18N = {
     usage: "usage",
     aiService: "AI service",
     remainingUsage: "Remaining usage",
+    quotaWindows: "Quota windows",
+    officialQuota: "Official quota",
+    quotaConsumption: "Quota consumption",
+    quotaSnapshot: "Official quota snapshots",
+    localTokenActivity: "Local token activity",
+    currentLimitsSafe: "Both quota windows are in a safe range",
+    currentLimitSafe: "The current quota window is in a safe range",
+    waitingLimitData: "Waiting for a new quota snapshot",
+    limitUnavailable: "Not currently available",
+    estimatedRemainingAtReset: "Estimated {percent}% remaining at reset",
+    actualConsumption: "Actual consumption",
+    estimatedConsumption: "Estimated consumption",
+    visibleSnapshotConsumption: "Visible snapshots used {percent}% · official usage is {official}%",
+    localTokenSummary: "Local logs recorded {value} tokens",
+    chartNoHistory: "Only the latest quota snapshot is available; bars will accumulate after future refreshes.",
+    chartHelp: "Chart help",
+    chartHelpTitle: "How to read this chart",
+    chartHelpTokens: "Each bar shows token usage recorded in local logs for that day.",
+    chartHelpFiveHour: "Each bar shows 5-hour quota consumption recorded within a 30-minute interval.",
+    chartHelpWeekly: "Each bar shows weekly quota consumption recorded for that day.",
+    chartHelpColor: "Taller, darker bars contain more data relative to the other periods in this chart; dashed bars are projections.",
     periodUsage: "Period usage",
     dataSource: "Data source",
     localEstimate: "Local log estimate",
     localActivityEstimate: "Local activity estimate",
     localActivityEstimateHint: "Estimated from local conversation activity; it is not an official ChatGPT quota.",
+    recentActivity: "Recent activity",
+    activityCount: "{count} activities",
+    rollingWindow: "Rolling window",
+    localRecordsOnly: "Local records only",
     todayCost: "Today cost",
     periodCost: "{days}-day cost",
     costUnavailable: "Reliable pricing unavailable",
@@ -322,11 +441,27 @@ const I18N = {
     periodAccumulated: "{days}-day total",
     periodTokenContext: "Total tokens {total} · latest {latest}",
     todayTokenUsageShare: "Today's token usage is {percent}% of the current period",
-    threadsTotal: "Total threads",
+    threadsTotal: "All-time sessions",
+    threadsTotalHint: "All session records scanned from the current provider's local data folder, including archived sessions and regardless of the chart period.",
+    allLocalRecords: "All local records",
     threadsActive: "Active",
     tokensTotal: "Total tokens",
     updatedThisWeek: "Updated in 7 days",
     activityTrend: "{days}-day trend",
+    usageInsights: "Period insights",
+    usageInsightsMeta: "Based on local records",
+    insightTrendLabel: "Last 7 days vs previous 7 days",
+    insightTrendUp: "Usage is rising",
+    insightTrendDown: "Usage is declining",
+    insightTrendSteady: "Usage is steady",
+    insightTrendUnavailable: "At least 14 days of records required",
+    insightPeakLabel: "Peak day in {days} days",
+    insightPeakNote: "{ratio}× the daily average",
+    insightWorkspaceLabel: "Top workspace",
+    insightWorkspaceBalanced: "Cumulative usage is fairly distributed",
+    insightWorkspaceConcentrated: "Cumulative usage is concentrated",
+    insightNoData: "No local token records",
+    insightWorkspaceHint: "Calculated from cumulative tokens across all local sessions in the current data source.",
     models: "Models",
     sources: "Sources",
     workspaces: "Workspaces",
@@ -397,7 +532,6 @@ const I18N = {
     updatedAt: "Updated {date}",
     updatesIn: "Updates in {time}",
     updatingSoon: "Updating soon",
-    percentUsage: "{percent}% {plan} usage",
     usageEstimated: "Estimated from local logs",
     usedUsage: "{percent}% used",
     usageHeadroom: "{percent}% headroom",
@@ -423,9 +557,22 @@ const elements = {
   homeView: document.getElementById("homeView"),
   settingsView: document.getElementById("settingsView"),
   homeButton: document.getElementById("homeButton"),
+  trendButton: document.getElementById("trendButton"),
+  activityButton: document.getElementById("activityButton"),
   settingsButton: document.getElementById("settingsButton"),
+  sourceShortcutButton: document.getElementById("sourceShortcutButton"),
+  providerMenuButton: document.getElementById("providerMenuButton"),
+  headerProviderLogo: document.getElementById("headerProviderLogo"),
+  headerProviderLabel: document.getElementById("headerProviderLabel"),
   settingsBackButton: document.getElementById("settingsBackButton"),
   settingsBackLabel: document.getElementById("settingsBackLabel"),
+  settingsWindowTitle: document.getElementById("settingsWindowTitle"),
+  settingsSearchInput: document.getElementById("settingsSearchInput"),
+  settingsProvidersTab: document.getElementById("settingsProvidersTab"),
+  settingsProviderTabs: document.getElementById("settingsProviderTabs"),
+  settingsSectionDescription: document.getElementById("settingsSectionDescription"),
+  settingsNoResults: document.getElementById("settingsNoResults"),
+  settingsNoResultsTitle: document.getElementById("settingsNoResultsTitle"),
   settingsPersonalLabel: document.getElementById("settingsPersonalLabel"),
   settingsProvidersLabel: document.getElementById("settingsProvidersLabel"),
   settingsGeneralNavLabel: document.getElementById("settingsGeneralNavLabel"),
@@ -448,6 +595,7 @@ const elements = {
   overviewSourceLabel: document.getElementById("overviewSourceLabel"),
   overviewEstimateLabel: document.getElementById("overviewEstimateLabel"),
   overviewPeriod: document.getElementById("overviewPeriod"),
+  overviewPeriodLabel: document.getElementById("overviewPeriodLabel"),
   overviewProviderLogo: document.getElementById("overviewProviderLogo"),
   overviewAccountName: document.getElementById("overviewAccountName"),
   overviewAccountPlan: document.getElementById("overviewAccountPlan"),
@@ -462,7 +610,7 @@ const elements = {
   errorPanel: document.getElementById("errorPanel"),
   todayCost: document.getElementById("todayCost"),
   periodCost: document.getElementById("periodCost"),
-  periodUsagePercent: document.getElementById("periodUsagePercent"),
+  periodUsageMeta: document.getElementById("periodUsageMeta"),
   periodTokens: document.getElementById("periodTokens"),
   periodTokensContext: document.getElementById("periodTokensContext"),
   todayTokens: document.getElementById("todayTokens"),
@@ -473,6 +621,7 @@ const elements = {
   todayTokensLabel: document.getElementById("todayTokensLabel"),
   activityTitle: document.getElementById("activityTitle"),
   threadsTotalLabel: document.getElementById("threadsTotalLabel"),
+  threadsTotalMeta: document.getElementById("threadsTotalMeta"),
   threadsActiveLabel: document.getElementById("threadsActiveLabel"),
   tokensTotalLabel: document.getElementById("tokensTotalLabel"),
   updatedThisWeekLabel: document.getElementById("updatedThisWeekLabel"),
@@ -483,6 +632,29 @@ const elements = {
   lastUpdated: document.getElementById("lastUpdated"),
   rateLimitUpdated: document.getElementById("rateLimitUpdated"),
   rateLimitTitle: document.getElementById("rateLimitTitle"),
+  statusHeading: document.getElementById("statusHeading"),
+  quotaSourceBadge: document.getElementById("quotaSourceBadge"),
+  chartSourceLabel: document.getElementById("chartSourceLabel"),
+  chartHelpButton: document.getElementById("chartHelpButton"),
+  chartHelpPopover: document.getElementById("chartHelpPopover"),
+  chartHelpTitle: document.getElementById("chartHelpTitle"),
+  chartHelpText: document.getElementById("chartHelpText"),
+  chartLegend: document.getElementById("chartLegend"),
+  chartInterpretation: document.getElementById("chartInterpretation"),
+  chartModeButtons: Array.from(document.querySelectorAll("[data-chart-mode]")),
+  usageInsightsTitle: document.getElementById("usageInsightsTitle"),
+  usageInsightsMeta: document.getElementById("usageInsightsMeta"),
+  insightTrendLabel: document.getElementById("insightTrendLabel"),
+  insightTrendValue: document.getElementById("insightTrendValue"),
+  insightTrendNote: document.getElementById("insightTrendNote"),
+  insightSparkline: document.getElementById("insightSparkline"),
+  insightPeakLabel: document.getElementById("insightPeakLabel"),
+  insightPeakValue: document.getElementById("insightPeakValue"),
+  insightPeakNote: document.getElementById("insightPeakNote"),
+  insightWorkspaceLabel: document.getElementById("insightWorkspaceLabel"),
+  insightWorkspaceValue: document.getElementById("insightWorkspaceValue"),
+  insightWorkspaceNote: document.getElementById("insightWorkspaceNote"),
+  activityMeta: document.getElementById("activityMeta"),
   modelTitle: document.getElementById("modelTitle"),
   sourceTitle: document.getElementById("sourceTitle"),
   workspaceTitle: document.getElementById("workspaceTitle"),
@@ -582,11 +754,13 @@ const elements = {
   settingsProviderNavButtons: Array.from(document.querySelectorAll("[data-settings-provider]")),
   enabledProviderInputs: Array.from(document.querySelectorAll("[data-enabled-provider]")),
   settingsNavButtons: Array.from(document.querySelectorAll("[data-settings-section]")),
+  settingsSections: Array.from(document.querySelectorAll(".settings-list > .settings-section")),
   themeSelect: document.getElementById("themeSelect"),
   accentButtons: Array.from(document.querySelectorAll("[data-accent]")),
   periodButtons: Array.from(document.querySelectorAll("[data-days]")),
   chartDaysInput: document.getElementById("chartDaysInput"),
-  settingsStatus: document.getElementById("settingsStatus")
+  settingsStatus: document.getElementById("settingsStatus"),
+  settingsContent: document.querySelector(".settings-content")
 };
 
 function systemLanguage() {
@@ -621,8 +795,8 @@ function applyProviderEstimateText(providerId = currentSettings.activeProvider) 
     "title",
     isChatgpt ? t("localActivityEstimateHint") : t("localEstimate")
   );
-  elements.rateLimitTitle.textContent = isChatgpt ? t("localActivityEstimate") : t("remainingUsage");
-  elements.rateLimitTitle.setAttribute("title", isChatgpt ? t("localActivityEstimateHint") : t("remainingUsage"));
+  elements.rateLimitTitle.textContent = isChatgpt ? t("recentActivity") : t("quotaWindows");
+  elements.rateLimitTitle.setAttribute("title", isChatgpt ? t("localActivityEstimateHint") : t("quotaWindows"));
 }
 
 function localeForLanguage() {
@@ -746,7 +920,8 @@ function rateLimitPace(limit) {
       remainingPercent,
       idealPercent: null,
       balancePercent: null,
-      exhaustionMs: null
+      exhaustionMs: null,
+      projectedRemainingPercent: null
     };
   }
 
@@ -756,12 +931,14 @@ function rateLimitPace(limit) {
   const idealPercent = clampPercent((elapsedMs / windowMs) * 100);
   const balancePercent = idealPercent - usedPercent;
   let exhaustionMs = null;
+  let projectedRemainingPercent = null;
 
   if (usedPercent >= 100) {
     exhaustionMs = 0;
   } else if (usedPercent > 0 && elapsedMs > 0) {
     const usedPercentPerMs = usedPercent / elapsedMs;
     const projectedMs = remainingPercent / usedPercentPerMs;
+    projectedRemainingPercent = clampPercent(100 - usedPercentPerMs * windowMs);
     if (Number.isFinite(projectedMs) && nowMs + projectedMs < resetMs) {
       exhaustionMs = Math.max(0, projectedMs);
     }
@@ -772,7 +949,8 @@ function rateLimitPace(limit) {
     remainingPercent,
     idealPercent,
     balancePercent,
-    exhaustionMs
+    exhaustionMs,
+    projectedRemainingPercent
   };
 }
 
@@ -893,10 +1071,23 @@ function primaryRateLimit(stats) {
   return availableRateLimitWindows(stats.rateLimits)[0] || null;
 }
 
+function availableActivityWindows(activity) {
+  if (!Array.isArray(activity?.windows)) return [];
+  return activity.windows.filter((window) => {
+    const count = Number(window?.count);
+    const windowMinutes = Number(window?.windowMinutes);
+    return Number.isFinite(count) && count >= 0 && Number.isFinite(windowMinutes) && windowMinutes > 0;
+  });
+}
+
+function primaryActivityWindow(stats) {
+  return availableActivityWindows(stats.activity)[0] || null;
+}
+
 function formatLimitLabel(limit) {
   const minutes = Number(limit?.windowMinutes) || 0;
   if (minutes === 300) return currentLanguage() === "zh" ? "5 小时" : "5 hours";
-  if (minutes === 10080) return currentLanguage() === "zh" ? "1 周" : "1 week";
+  if (minutes === 10080) return currentLanguage() === "zh" ? "每周" : "Weekly";
   if (minutes >= 10080 && minutes % 10080 === 0) {
     const weeks = minutes / 10080;
     return currentLanguage() === "zh" ? `${weeks} 周` : `${weeks} weeks`;
@@ -1099,12 +1290,20 @@ function applyLanguage() {
   const chartDays = currentSettings.chartDays || 30;
 
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
-  elements.documentTitle.textContent = "AI Usage";
+  elements.documentTitle.textContent = "Dial";
   elements.brandSubtitle.textContent = t("brandSubtitle");
   elements.primaryNav.setAttribute("aria-label", t("primaryNavigation"));
-  elements.homeButton.textContent = t("overview");
-  elements.settingsButton.textContent = t("settings");
+  elements.homeButton.textContent = t("summary");
+  elements.trendButton.textContent = t("trend");
+  elements.activityButton.textContent = t("activityTab");
+  elements.sourceShortcutButton.textContent = t("switchDataSource");
+  elements.settingsButton.setAttribute("aria-label", t("settings"));
+  elements.settingsButton.setAttribute("title", t("settings"));
   elements.settingsBackLabel.textContent = t("backToApp");
+  elements.settingsWindowTitle.textContent = t("settings");
+  elements.settingsSearchInput.placeholder = t("settingsSearch");
+  elements.settingsSearchInput.setAttribute("aria-label", t("settingsSearch"));
+  elements.settingsNoResultsTitle.textContent = t("settingsNoResults");
   elements.settingsPersonalLabel.textContent = t("personal");
   elements.settingsProvidersLabel.textContent = t("providers");
   elements.settingsGeneralNavLabel.textContent = t("general");
@@ -1135,7 +1334,8 @@ function applyLanguage() {
   applyProviderEstimateText();
   renderCostMetricLabels(chartDays);
   elements.periodTokensLabel.textContent = t("periodTokens", { days: chartDays });
-  elements.periodUsagePercent.dataset.periodLabel = t("periodAccumulated", { days: chartDays });
+  elements.periodUsageMeta.dataset.periodLabel = t("periodAccumulated", { days: chartDays });
+  elements.periodUsageMeta.textContent = t("localRecordsOnly");
   if (lastStats) {
     elements.periodTokensContext.textContent = t("periodTokenContext", {
       total: formatCompact(lastStats.totals.totalTokens),
@@ -1147,16 +1347,36 @@ function applyLanguage() {
     lastStats ? statsRatioPercent(lastStats.featured.todayTokens, lastStats.featured.periodTokens) : 0
   );
   elements.threadsTotalLabel.textContent = t("threadsTotal");
+  elements.threadsTotalLabel.setAttribute("title", t("threadsTotalHint"));
+  elements.threadsTotal.setAttribute("title", t("threadsTotalHint"));
+  elements.threadsTotalMeta.textContent = t("allLocalRecords");
+  elements.threadsTotalMeta.setAttribute("title", t("threadsTotalHint"));
   elements.threadsActiveLabel.textContent = t("threadsActive");
   elements.tokensTotalLabel.textContent = t("tokensTotal");
   elements.updatedThisWeekLabel.textContent = t("updatedThisWeek");
-  elements.activityTitle.textContent = t("activityTrend", { days: chartDays });
+  elements.activityTitle.textContent = t("quotaConsumption");
+  elements.rateLimitTitle.textContent = t("quotaWindows");
+  for (const button of elements.chartModeButtons) {
+    if (button.dataset.chartMode === "five-hour") {
+      button.textContent = formatLimitLabel({ windowMinutes: 300 });
+    } else if (button.dataset.chartMode === "weekly") {
+      button.textContent = formatLimitLabel({ windowMinutes: 10080 });
+    } else {
+      button.textContent = "Token";
+    }
+  }
+  renderChartHelp();
   elements.modelTitle.textContent = t("models");
   elements.sourceTitle.textContent = t("sources");
   elements.workspaceTitle.textContent = t("workspaces");
   elements.recentThreadsTitle.textContent = t("recentThreads");
-  elements.settingsPanelTitle.textContent = t("general");
-  elements.settingsGeneralTitle.textContent = t("general");
+  elements.usageInsightsTitle.textContent = t("usageInsights");
+  elements.usageInsightsMeta.textContent = t("usageInsightsMeta");
+  if (lastStats) {
+    renderUsageInsights(lastStats);
+  }
+  elements.settingsPanelTitle.textContent = t("settingsGeneralTitle");
+  elements.settingsGeneralTitle.textContent = t("settingsAppGroup");
   elements.settingsProvidersContentTitle.textContent = t("providers");
   elements.settingsCodexProviderTitle.textContent = PROVIDERS.codex.label;
   elements.settingsClaudeProviderTitle.textContent = PROVIDERS.claude.label;
@@ -1164,7 +1384,7 @@ function applyLanguage() {
   elements.settingsCursorProviderTitle.textContent = PROVIDERS.cursor.label;
   elements.settingsChatgptProviderTitle.textContent = PROVIDERS.chatgpt.label;
   elements.settingsAppearanceTitle.textContent = t("appearance");
-  elements.settingsChartTitle.textContent = t("chart");
+  elements.settingsChartTitle.textContent = t("settingsExperienceGroup");
   elements.settingsDataTitle.textContent = t("dataAndCache");
   elements.settingsUpdateTitle.textContent = t("updates");
   elements.scanProviderLabel.textContent = t("scanProvider");
@@ -1233,6 +1453,10 @@ function applyTheme(theme) {
     theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : theme;
 
   document.body.dataset.theme = resolvedTheme === "dark" ? "dark" : "light";
+  syncProviderLogoTheme();
+  if (lastStats) {
+    renderUsageInsights(lastStats);
+  }
 }
 
 function applyAccent(accentColor) {
@@ -1323,10 +1547,13 @@ function setView(view) {
   elements.homeView.hidden = isSettings;
   elements.settingsView.hidden = !isSettings;
   elements.refreshButton.hidden = isSettings;
-  elements.homeButton.classList.toggle("active", !isSettings);
   elements.settingsButton.classList.toggle("active", isSettings);
   elements.viewEyebrow.textContent = isSettings ? t("preferences") : `${provider.label} ${t("usage")}`;
   elements.viewTitle.textContent = isSettings ? t("settings") : t("overview");
+  if (isSettings) {
+    setProviderMenuOpen(false);
+  }
+  updateHomeSectionNav();
   renderUpdateSurfaces();
   renderAutoRefreshCountdown();
   syncRateLimitCountdownTimer();
@@ -1344,12 +1571,139 @@ function settingsPanelGroupTitle(sectionId) {
     : t("providers");
 }
 
-function activateSettingsNav(sectionId) {
-  activeSettingsSectionId = sectionId;
-  for (const button of elements.settingsNavButtons) {
-    button.classList.toggle("active", button.dataset.settingsSection === sectionId);
+function updateHomeSectionNav() {
+  const sectionButtons = {
+    summary: elements.homeButton,
+    trend: elements.trendButton,
+    activity: elements.activityButton
+  };
+  for (const [section, button] of Object.entries(sectionButtons)) {
+    button.classList.toggle("active", currentView === "home" && currentHomeSection === section);
   }
-  elements.settingsPanelTitle.textContent = settingsPanelGroupTitle(sectionId);
+}
+
+function setHomeSection(section, options = {}) {
+  currentHomeSection = section;
+  setView("home");
+  const target =
+    section === "trend"
+      ? document.getElementById("usageChartPanel")
+      : section === "activity"
+        ? document.getElementById("activitySection")
+        : elements.homeView;
+  if (options.scroll !== false) {
+    if (section === "summary") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } else {
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+}
+
+function setProviderMenuOpen(open) {
+  const shouldOpen = Boolean(open && currentView === "home");
+  elements.sidebarProviderSection.hidden = !shouldOpen;
+  elements.providerMenuButton.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+const PERSONAL_SETTINGS_SECTION_IDS = [
+  "settingsGeneralSection",
+  "settingsAppearanceSection",
+  "settingsChartSection",
+  "settingsDataSection",
+  "settingsUpdateSection"
+];
+
+function isProviderSettingsSection(sectionId) {
+  return !PERSONAL_SETTINGS_SECTION_IDS.includes(sectionId);
+}
+
+function providerForSettingsSection(sectionId) {
+  const button = elements.settingsProviderNavButtons.find(
+    (candidate) => candidate.dataset.settingsSection === sectionId
+  );
+  return button?.dataset.settingsProvider || null;
+}
+
+function settingsPanelTitle(sectionId) {
+  if (sectionId === "settingsGeneralSection") return t("settingsGeneralTitle");
+  if (sectionId === "settingsAppearanceSection") return t("appearance");
+  if (sectionId === "settingsChartSection") return t("chart");
+  if (sectionId === "settingsDataSection") return t("dataAndCache");
+  if (sectionId === "settingsUpdateSection") return t("updates");
+  const providerId = providerForSettingsSection(sectionId);
+  return providerId ? PROVIDERS[providerId]?.label || t("providers") : t("providers");
+}
+
+function settingsPanelDescription(sectionId) {
+  if (sectionId === "settingsGeneralSection") return t("settingsGeneralDescription");
+  if (sectionId === "settingsAppearanceSection") return t("settingsAppearanceDescription");
+  if (sectionId === "settingsChartSection") return t("settingsChartDescription");
+  if (sectionId === "settingsDataSection") return t("settingsDataDescription");
+  if (sectionId === "settingsUpdateSection") return t("settingsUpdateDescription");
+  return t("settingsProvidersDescription");
+}
+
+function updateSettingsSectionHeadings() {
+  elements.settingsGeneralTitle.textContent = t("settingsAppGroup");
+  elements.settingsAppearanceTitle.textContent = t("appearance");
+  elements.settingsChartTitle.textContent =
+    activeSettingsSectionId === "settingsGeneralSection" ? t("settingsExperienceGroup") : t("chart");
+  elements.settingsDataTitle.textContent = t("dataAndCache");
+  elements.settingsUpdateTitle.textContent = t("updates");
+}
+
+function updateSettingsSectionVisibility() {
+  const query = elements.settingsSearchInput.value.trim();
+  const normalizedQuery = query.toLocaleLowerCase();
+  const isSearching = Boolean(normalizedQuery);
+  const isProviderSection = isProviderSettingsSection(activeSettingsSectionId);
+  let visibleCount = 0;
+
+  for (const section of elements.settingsSections) {
+    let visible;
+    if (isSearching) {
+      visible = section.textContent.toLocaleLowerCase().includes(normalizedQuery);
+    } else if (activeSettingsSectionId === "settingsGeneralSection") {
+      visible = ["settingsGeneralSection", "settingsChartSection"].includes(section.id);
+    } else {
+      visible = section.id === activeSettingsSectionId;
+    }
+    section.hidden = !visible;
+    if (visible) visibleCount += 1;
+  }
+
+  elements.settingsProviderTabs.hidden = isSearching || !isProviderSection;
+  elements.settingsNoResults.hidden = !isSearching || visibleCount > 0;
+  if (isSearching) {
+    elements.settingsPanelTitle.textContent = t("settingsSearchResults");
+    elements.settingsSectionDescription.textContent = t("settingsSearchDescription", { query });
+  } else {
+    elements.settingsPanelTitle.textContent = settingsPanelTitle(activeSettingsSectionId);
+    elements.settingsSectionDescription.textContent = settingsPanelDescription(activeSettingsSectionId);
+  }
+  updateSettingsSectionHeadings();
+}
+
+function clearSettingsSearch() {
+  if (!elements.settingsSearchInput.value) return;
+  elements.settingsSearchInput.value = "";
+}
+
+function activateSettingsNav(sectionId, options = {}) {
+  activeSettingsSectionId = sectionId;
+  const isProviderSection = isProviderSettingsSection(sectionId);
+  for (const button of elements.settingsNavButtons) {
+    const isActive = button.dataset.settingsSection === sectionId;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-current", isActive ? "page" : "false");
+  }
+  elements.settingsProvidersTab.classList.toggle("active", isProviderSection);
+  elements.settingsProvidersTab.setAttribute("aria-current", isProviderSection ? "page" : "false");
+  updateSettingsSectionVisibility();
+  if (options.scroll) {
+    elements.settingsContent.scrollTo({ top: 0, behavior: "smooth" });
+  }
 }
 
 function renderProviderVisibility() {
@@ -1464,16 +1818,23 @@ function setChartScale(daysCount) {
 }
 
 function renderChartSkeleton(daysCount) {
-  elements.dailyChart.replaceChildren();
-  setChartScale(daysCount);
-  for (let index = 0; index < daysCount; index += 1) {
-    const column = document.createElement("div");
-    column.className = "day-column";
-    const bar = document.createElement("div");
-    bar.className = "day-bar skeleton-block";
-    bar.style.height = `${18 + ((index * 17) % 54)}%`;
-    column.append(bar);
-    elements.dailyChart.append(column);
+  const count = Math.min(12, Math.max(7, daysCount));
+  renderUsageBarChart({
+    items: Array.from({ length: count }, (_, index) => ({
+      label: "",
+      value: 18 + ((index * 17) % 54),
+      displayValue: "",
+      secondaryValue: "",
+      showLabel: false
+    })),
+    maxValue: 100,
+    formatAxis: () => "",
+    referenceValue: null,
+    referenceLabel: ""
+  });
+  for (const bar of elements.dailyChart.querySelectorAll(".chart-bar")) {
+    bar.disabled = true;
+    bar.classList.add("loading-bar");
   }
 }
 
@@ -1484,23 +1845,24 @@ function renderStatsSkeleton(providerId = currentSettings.activeProvider) {
   const provider = PROVIDERS[providerId] || PROVIDERS.codex;
   const chartDays = currentSettings.chartDays || 30;
   elements.overviewProvider.textContent = provider.label;
-  elements.overviewProviderLogo.src = provider.icon;
+  setProviderImage(elements.overviewProviderLogo, providerId);
+  setProviderImage(elements.headerProviderLogo, providerId);
+  elements.headerProviderLabel.textContent = provider.label;
   elements.overviewAccountName.textContent = provider.label;
   elements.overviewAccountPlan.textContent = provider.label;
   applyProviderEstimateText(providerId);
   renderCostMetricLabels(chartDays);
   elements.periodTokensLabel.textContent = t("periodTokens", { days: chartDays });
-  elements.periodUsagePercent.dataset.periodLabel = t("periodAccumulated", { days: chartDays });
+  elements.periodUsageMeta.dataset.periodLabel = t("periodAccumulated", { days: chartDays });
   elements.activityTitle.textContent = t("activityTrend", { days: chartDays });
-  elements.overviewPeriod.textContent = t("daysPeriod", { days: chartDays });
-  elements.periodTokens.closest(".hero-metric")?.style.setProperty("--usage-progress", "0%");
+  elements.overviewPeriodLabel.textContent = t("daysPeriod", { days: chartDays });
   updateTodayTokensMeter(0);
   elements.accountInitials.textContent = provider.initials;
   elements.accountName.textContent = provider.label;
   markSkeleton(elements.accountPlan, "64px");
   markSkeleton(elements.todayCost, "86px");
   markSkeleton(elements.periodCost, "86px");
-  markSkeleton(elements.periodUsagePercent, "110px");
+  markSkeleton(elements.periodUsageMeta, "110px");
   markSkeleton(elements.periodTokens, "78px");
   markSkeleton(elements.periodTokensContext, "172px");
   markSkeleton(elements.todayTokens, "72px");
@@ -1513,8 +1875,11 @@ function renderStatsSkeleton(providerId = currentSettings.activeProvider) {
   markSkeleton(elements.lastUpdated, "118px");
   markSkeleton(elements.rateLimitUpdated, "94px");
 
-  renderChartSkeleton(chartDays);
-  appendSkeletonRows(elements.rateLimitList, 2);
+  elements.chartLegend.replaceChildren();
+  elements.chartInterpretation.textContent = t("chartNoHistory");
+  renderChartSkeleton(10);
+  renderRateLimits(null);
+  renderUsageInsights(null, chartDays);
   appendSkeletonRows(elements.modelList, 3);
   appendSkeletonRows(elements.sourceList, 3);
   appendSkeletonRows(elements.workspaceList, 4);
@@ -1549,7 +1914,7 @@ function renderSettings() {
   elements.chartDaysInput.min = String(MIN_CHART_DAYS);
   elements.chartDaysInput.max = String(MAX_CHART_DAYS);
   elements.chartDaysInput.value = currentSettings.chartDays;
-  elements.overviewPeriod.textContent = t("daysPeriod", { days: currentSettings.chartDays });
+  elements.overviewPeriodLabel.textContent = t("daysPeriod", { days: currentSettings.chartDays });
   elements.sidebarPeriodMeta.textContent = t("daysPeriod", { days: currentSettings.chartDays });
   for (const button of elements.periodButtons) {
     button.classList.toggle("active", Number(button.dataset.days) === Number(currentSettings.chartDays));
@@ -1597,73 +1962,52 @@ function renderRankList(container, items, options = {}) {
 
 function renderRateLimits(rateLimits) {
   elements.rateLimitList.replaceChildren();
-  const windows = availableRateLimitWindows(rateLimits);
+  const windows = availableRateLimitWindows(rateLimits).sort((a, b) => a.windowMinutes - b.windowMinutes);
 
-  if (!windows.length) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = t("emptyRateLimits");
-    elements.rateLimitList.append(empty);
-    elements.rateLimitUpdated.textContent = "-";
-    syncRateLimitCountdownTimer();
-    return;
-  }
-
-  elements.rateLimitUpdated.textContent = rateLimits.updatedAt
+  elements.rateLimitUpdated.textContent = rateLimits?.updatedAt
     ? t("updatedAt", { date: formatDate(rateLimits.updatedAt) })
-    : "-";
+    : t("waitingLimitData");
 
   for (const limit of windows) {
+    const minutes = Number(limit.windowMinutes);
     const pace = rateLimitPace(limit);
     const row = document.createElement("div");
     row.className = "limit-row";
-    row.classList.toggle("overrun", Number(pace.balancePercent) < 0);
+
+    const icon = document.createElement("span");
+    icon.className = `ui-icon limit-icon ${minutes === 300 ? "icon-clock" : "icon-calendar"}`;
+    icon.setAttribute("aria-hidden", "true");
 
     const label = document.createElement("strong");
-    label.textContent = formatLimitLabel(limit);
+    label.textContent = formatLimitLabel({ windowMinutes: minutes });
 
-    const used = document.createElement("span");
-    used.className = "limit-used";
-    used.textContent = t("usedUsage", { percent: Math.round(pace.usedPercent) });
-
-    const countdown = document.createElement("span");
-    countdown.className = "limit-countdown";
-    countdown.dataset.resetCountdown = limit.resetsAt || "";
-    countdown.textContent = formatUpdateCountdown(limit.resetsAt);
+    const value = document.createElement("span");
+    value.className = "limit-value";
+    const valueNumber = document.createElement("b");
+    valueNumber.textContent = formatPercent(pace.remainingPercent);
+    value.append(valueNumber, document.createTextNode(currentLanguage() === "zh" ? " 剩余" : " remaining"));
 
     const meter = document.createElement("div");
     meter.className = "limit-meter";
-    meter.classList.toggle("no-ideal", pace.idealPercent === null);
-    meter.style.setProperty("--used", `${pace.usedPercent}%`);
-    meter.style.setProperty("--ideal", `${pace.idealPercent ?? 0}%`);
-    if (pace.idealPercent !== null) {
-      meter.setAttribute("title", t("idealUsageMarker", { percent: Math.round(pace.idealPercent) }));
-    }
+    meter.setAttribute("role", "progressbar");
+    meter.setAttribute("aria-valuemin", "0");
+    meter.setAttribute("aria-valuemax", "100");
+    meter.setAttribute("aria-valuenow", String(Math.round(pace.remainingPercent)));
+    meter.setAttribute("aria-label", `${label.textContent} ${value.textContent}`);
+    appendSegmentedMeter(meter, pace.remainingPercent);
 
-    const paceLine = document.createElement("div");
-    paceLine.className = "limit-pace";
-
-    const balance = document.createElement("span");
-    const balancePercent = Math.round(Math.abs(Number(pace.balancePercent) || 0));
-    balance.className = Number(pace.balancePercent) < 0 ? "limit-overrun" : "limit-headroom";
-    balance.textContent =
-      pace.balancePercent === null
-        ? t("usageHeadroom", { percent: Math.round(pace.remainingPercent) })
-        : Number(pace.balancePercent) < 0
-          ? t("usageOverrun", { percent: balancePercent })
-          : t("usageHeadroom", { percent: balancePercent });
-
+    const meta = document.createElement("div");
+    meta.className = "limit-meta";
+    const countdown = document.createElement("strong");
     const projection = document.createElement("span");
-    projection.className = "limit-projection";
-    if (pace.exhaustionMs === null) {
-      projection.textContent = t("lastsUntilReset");
-    } else {
-      projection.dataset.exhaustionCountdown = new Date(Date.now() + pace.exhaustionMs).toISOString();
-      projection.textContent = t("projectedEmpty", { time: formatDuration(pace.exhaustionMs) });
-    }
-
-    paceLine.append(balance, projection);
-    row.append(label, used, countdown, meter, paceLine);
+    countdown.dataset.resetCountdown = limit.resetsAt || "";
+    countdown.textContent = formatUpdateCountdown(limit.resetsAt);
+    projection.textContent =
+      pace.projectedRemainingPercent === null
+        ? `${formatResetTime(limit)} ${currentLanguage() === "zh" ? "重置" : "reset"}`
+        : t("estimatedRemainingAtReset", { percent: Math.round(pace.projectedRemainingPercent) });
+    meta.append(countdown, projection);
+    row.append(icon, label, value, meter, meta);
     elements.rateLimitList.append(row);
   }
 
@@ -1671,55 +2015,373 @@ function renderRateLimits(rateLimits) {
   syncRateLimitCountdownTimer();
 }
 
-function renderDailyChart(days) {
-  elements.dailyChart.replaceChildren();
-  setChartScale(days.length);
-
-  const maxTokens = Math.max(...days.map((day) => day.tokens), 1);
-
-  for (const day of days) {
-    const column = document.createElement("div");
-    column.className = "day-column";
-
-    const bar = document.createElement("div");
-    bar.className = "day-bar";
-    const intensity = day.tokens / maxTokens;
-    if (intensity >= 0.72) {
-      bar.dataset.level = "high";
-    } else if (intensity >= 0.36) {
-      bar.dataset.level = "medium";
-    } else {
-      bar.dataset.level = "low";
-    }
-    if (day.tokens === 0) {
-      bar.dataset.empty = "true";
-    }
-    bar.style.height = day.tokens > 0 ? `${Math.max(8, (day.tokens / maxTokens) * 100)}%` : "3px";
-    bar.setAttribute("aria-label", `${day.date}: ${formatCompact(day.tokens)} ${t("tokens")}`);
-    bar.addEventListener("mouseenter", (event) => {
-      bar.classList.add("active");
-      showChartTooltip(event, day);
-    });
-    bar.addEventListener("mousemove", (event) => moveChartTooltip(event));
-    bar.addEventListener("mouseleave", () => {
-      bar.classList.remove("active");
-      hideChartTooltip();
-    });
-
-    column.append(bar);
-    elements.dailyChart.append(column);
+function appendSegmentedMeter(meter, percent) {
+  const remaining = clampPercent(percent);
+  const segmentCount = 10;
+  for (let index = 0; index < segmentCount; index += 1) {
+    const segment = document.createElement("span");
+    segment.className = "limit-segment";
+    const fill = document.createElement("i");
+    fill.style.width = `${Math.max(0, Math.min(10, remaining - index * 10)) * 10}%`;
+    segment.append(fill);
+    meter.append(segment);
   }
 }
 
-function showChartTooltip(event, day) {
+function renderActivity(activity) {
+  elements.rateLimitList.replaceChildren();
+  const windows = availableActivityWindows(activity);
+
+  if (!windows.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = t("emptyData");
+    elements.rateLimitList.append(empty);
+    elements.rateLimitUpdated.textContent = "-";
+    syncRateLimitCountdownTimer();
+    return;
+  }
+
+  elements.rateLimitUpdated.textContent = activity.updatedAt
+    ? t("updatedAt", { date: formatDate(activity.updatedAt) })
+    : "-";
+
+  for (const window of windows) {
+    const row = document.createElement("div");
+    row.className = "limit-row activity-row";
+
+    const icon = document.createElement("span");
+    icon.className = `ui-icon limit-icon ${Number(window.windowMinutes) < 10080 ? "icon-clock" : "icon-calendar"}`;
+    icon.setAttribute("aria-hidden", "true");
+
+    const label = document.createElement("strong");
+    label.textContent = formatLimitLabel(window);
+
+    const count = document.createElement("span");
+    count.className = "limit-value";
+    const countNumber = document.createElement("b");
+    countNumber.textContent = formatNumber(window.count);
+    count.append(countNumber, document.createTextNode(currentLanguage() === "zh" ? " 次活动" : " activities"));
+
+    const meter = document.createElement("div");
+    meter.className = "limit-meter";
+    appendSegmentedMeter(meter, 0);
+
+    const meta = document.createElement("div");
+    meta.className = "limit-meta";
+    const rolling = document.createElement("strong");
+    rolling.textContent = t("rollingWindow");
+    const source = document.createElement("span");
+    source.textContent = t("localRecordsOnly");
+    meta.append(rolling, source);
+
+    row.append(icon, label, count, meter, meta);
+    elements.rateLimitList.append(row);
+  }
+
+  syncRateLimitCountdownTimer();
+}
+
+function rateLimitWindowByMinutes(stats, windowMinutes) {
+  return availableRateLimitWindows(stats?.rateLimits).find(
+    (window) => Number(window.windowMinutes) === Number(windowMinutes)
+  );
+}
+
+function rateLimitHistoryByMinutes(stats, windowMinutes) {
+  if (!Array.isArray(stats?.rateLimitHistory)) return null;
+  return stats.rateLimitHistory.find((series) => Number(series.windowMinutes) === Number(windowMinutes)) || null;
+}
+
+function chartModeWindowMinutes(mode) {
+  if (mode === "five-hour") return 300;
+  if (mode === "weekly") return 10080;
+  return null;
+}
+
+function syncChartMode(stats) {
+  for (const button of elements.chartModeButtons) {
+    const minutes = chartModeWindowMinutes(button.dataset.chartMode);
+    const unavailable = minutes !== null && !rateLimitWindowByMinutes(stats, minutes);
+    button.hidden = unavailable;
+    button.disabled = unavailable;
+  }
+
+  const currentButton = elements.chartModeButtons.find((button) => button.dataset.chartMode === currentChartMode);
+  if (!currentButton || currentButton.disabled || currentButton.hidden) {
+    currentChartMode = "tokens";
+  }
+
+  for (const button of elements.chartModeButtons) {
+    const isSelected = button.dataset.chartMode === currentChartMode;
+    button.setAttribute("aria-selected", String(isSelected));
+    button.tabIndex = isSelected ? 0 : -1;
+  }
+}
+
+function buildTokenBars(stats, daysCount = null) {
+  const source = Array.isArray(stats?.dailySeries) ? stats.dailySeries : [];
+  const days = daysCount ? source.slice(-daysCount) : source;
+  return {
+    items: days.map((day, index) => ({
+      label: day.label || day.date,
+      value: Number(day.tokens) || 0,
+      displayValue: `${formatCompact(day.tokens)} ${t("tokens")}`,
+      secondaryValue: formatCurrency(day.cost),
+      showLabel: days.length <= 14 || index % Math.max(1, Math.ceil(days.length / 7)) === 0
+    })),
+    maxValue: Math.max(...days.map((day) => Number(day.tokens) || 0), 1),
+    formatAxis: (value) => formatCompact(value),
+    referenceValue: null,
+    interpretation: t("localTokenSummary", { value: formatCompact(days.reduce((sum, day) => sum + (Number(day.tokens) || 0), 0)) }),
+    sourceLabel: t("localTokenActivity"),
+    legend: [{ label: t("actualConsumption"), estimated: false }]
+  };
+}
+
+function buildRateLimitHistoryPending(stats, windowMinutes) {
+  const bucketCount = windowMinutes === 300 ? 10 : 7;
+  const limit = rateLimitWindowByMinutes(stats, windowMinutes);
+  const resetMs = new Date(limit?.resetsAt || "").getTime();
+  const endMs = Number.isFinite(resetMs) ? resetMs : Date.now();
+  const startMs = endMs - windowMinutes * 60 * 1000;
+  const bucketMs = (endMs - startMs) / bucketCount;
+
+  return {
+    items: Array.from({ length: bucketCount }, (_, index) => {
+      const timestamp = new Date(startMs + index * bucketMs);
+      const label = windowMinutes === 300
+        ? new Intl.DateTimeFormat(localeForLanguage(), { hour: "2-digit", minute: "2-digit" }).format(timestamp)
+        : new Intl.DateTimeFormat(localeForLanguage(), { weekday: "short" }).format(timestamp);
+      return {
+        label,
+        value: 0,
+        displayValue: "0%",
+        secondaryValue: t("chartNoHistory"),
+        showLabel: windowMinutes !== 300 || index % 2 === 0
+      };
+    }),
+    maxValue: 100,
+    formatAxis: (value) => `${Math.round(value)}%`,
+    referenceValue: null,
+    interpretation: t("chartNoHistory"),
+    sourceLabel: t("quotaSnapshot"),
+    legend: [{ label: t("actualConsumption"), estimated: false }]
+  };
+}
+
+function buildRateLimitBars(stats, windowMinutes) {
+  const limit = rateLimitWindowByMinutes(stats, windowMinutes);
+  const history = rateLimitHistoryByMinutes(stats, windowMinutes);
+  const bucketCount = windowMinutes === 300 ? 10 : 7;
+  const resetMs = new Date(limit?.resetsAt || "").getTime();
+  const endMs = Number.isFinite(resetMs) ? resetMs : Date.now();
+  const startMs = endMs - windowMinutes * 60 * 1000;
+  const nowMs = Math.min(Date.now(), endMs);
+  const bucketMs = (endMs - startMs) / bucketCount;
+  const values = Array.from({ length: bucketCount }, () => 0);
+  const estimated = Array.from({ length: bucketCount }, () => false);
+  const points = (history?.points || [])
+    .map((point) => ({ ...point, timestampMs: new Date(point.timestamp).getTime() }))
+    .filter((point) => Number.isFinite(point.timestampMs) && point.timestampMs >= startMs && point.timestampMs <= nowMs)
+    .sort((a, b) => a.timestampMs - b.timestampMs);
+
+  let previous = null;
+  for (const point of points) {
+    let delta = 0;
+    if (previous) {
+      delta = Number(point.usedPercent) >= Number(previous.usedPercent)
+        ? Number(point.usedPercent) - Number(previous.usedPercent)
+        : Number(point.usedPercent);
+    } else if (point.timestampMs - startMs <= bucketMs * 1.25) {
+      delta = Number(point.usedPercent) || 0;
+    }
+    previous = point;
+    if (delta <= 0) continue;
+    const index = Math.min(bucketCount - 1, Math.max(0, Math.floor((point.timestampMs - startMs) / bucketMs)));
+    values[index] += delta;
+  }
+
+  const elapsedFraction = Math.max(0.01, Math.min(1, (nowMs - startMs) / (endMs - startMs)));
+  const officialUsed = clampPercent(limit?.usedPercent);
+  const projectedTotal = Math.min(100, officialUsed / elapsedFraction);
+  const projectedAdditional = Math.max(0, projectedTotal - officialUsed);
+  const firstFutureBucket = Math.min(bucketCount, Math.max(0, Math.ceil((nowMs - startMs) / bucketMs)));
+  const futureCount = Math.max(0, bucketCount - firstFutureBucket);
+  if (futureCount > 0 && projectedAdditional > 0) {
+    const perBucket = projectedAdditional / futureCount;
+    for (let index = firstFutureBucket; index < bucketCount; index += 1) {
+      values[index] = perBucket;
+      estimated[index] = true;
+    }
+  }
+
+  const visibleActual = values.reduce((sum, value, index) => sum + (estimated[index] ? 0 : value), 0);
+  const referenceValue = 100 / bucketCount;
+  const maxValue = Math.max(...values, referenceValue, 1) * 1.12;
+  const items = values.map((value, index) => {
+    const timestamp = new Date(startMs + index * bucketMs);
+    const label = windowMinutes === 300
+      ? new Intl.DateTimeFormat(localeForLanguage(), { hour: "2-digit", minute: "2-digit" }).format(timestamp)
+      : new Intl.DateTimeFormat(localeForLanguage(), { weekday: "short" }).format(timestamp);
+    return {
+      label,
+      value,
+      estimated: estimated[index],
+      displayValue: `${value.toFixed(value >= 10 ? 0 : 1).replace(/\.0$/, "")}%`,
+      secondaryValue: estimated[index] ? t("estimatedConsumption") : t("actualConsumption"),
+      showLabel: windowMinutes !== 300 || index % 2 === 0
+    };
+  });
+
+  return {
+    items,
+    maxValue,
+    formatAxis: (value) => `${Math.round(value)}%`,
+    referenceValue,
+    referenceLabel: currentLanguage() === "zh"
+      ? `建议速度 ${referenceValue.toFixed(0)}% / ${windowMinutes === 300 ? "30 分钟" : "天"}`
+      : `Suggested pace ${referenceValue.toFixed(0)}% / ${windowMinutes === 300 ? "30 min" : "day"}`,
+    interpretation: points.length > 1
+      ? t("visibleSnapshotConsumption", { percent: Math.round(visibleActual), official: Math.round(officialUsed) })
+      : t("chartNoHistory"),
+    sourceLabel: t("quotaSnapshot"),
+    legend: [
+      { label: t("actualConsumption"), estimated: false },
+      { label: t("estimatedConsumption"), estimated: true }
+    ]
+  };
+}
+
+function renderChartLegend(items) {
+  elements.chartLegend.replaceChildren();
+  for (const item of items) {
+    const label = document.createElement("span");
+    const swatch = document.createElement("i");
+    swatch.className = `legend-swatch${item.estimated ? " estimated" : ""}`;
+    swatch.setAttribute("aria-hidden", "true");
+    label.append(swatch, document.createTextNode(item.label));
+    elements.chartLegend.append(label);
+  }
+}
+
+function renderUsageBarChart(config) {
+  elements.dailyChart.replaceChildren();
+  const yAxis = document.createElement("div");
+  yAxis.className = "chart-y-axis";
+  const plot = document.createElement("div");
+  plot.className = "chart-plot";
+  plot.style.setProperty("--days", String(Math.max(config.items.length, 1)));
+  plot.style.setProperty("--chart-gap", config.items.length > 30 ? "2px" : "7px");
+
+  const gridlines = document.createElement("div");
+  gridlines.className = "chart-gridlines";
+  for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+    const axisLabel = document.createElement("span");
+    axisLabel.style.setProperty("--axis-position", `${fraction * 100}%`);
+    axisLabel.textContent = config.formatAxis(config.maxValue * fraction);
+    yAxis.append(axisLabel);
+
+    const line = document.createElement("span");
+    line.className = "chart-gridline";
+    line.style.bottom = `${fraction * 100}%`;
+    gridlines.append(line);
+  }
+  plot.append(gridlines);
+
+  if (Number.isFinite(config.referenceValue) && config.referenceValue > 0) {
+    const reference = document.createElement("div");
+    reference.className = "chart-reference-line";
+    reference.style.bottom = `${Math.min(100, (config.referenceValue / config.maxValue) * 100)}%`;
+    const referenceLabel = document.createElement("span");
+    referenceLabel.textContent = config.referenceLabel;
+    reference.append(referenceLabel);
+    plot.append(reference);
+  }
+
+  for (const item of config.items) {
+    const column = document.createElement("div");
+    column.className = "chart-column";
+    const bar = document.createElement("button");
+    const numericValue = Math.max(0, Number(item.value) || 0);
+    const numericMax = Math.max(1, Number(config.maxValue) || 1);
+    const valueRatio = Math.min(1, numericValue / numericMax);
+    const fillIntensity = Math.round(8 + valueRatio * 92);
+    const borderIntensity = Math.round(32 + valueRatio * 68);
+    const estimatedIntensity = Math.round(6 + valueRatio * 34);
+    bar.type = "button";
+    bar.className = `chart-bar${item.estimated ? " estimated" : ""}`;
+    bar.style.height = item.value > 0 ? `${Math.max(2, (item.value / config.maxValue) * 100)}%` : "2px";
+    bar.style.setProperty("--bar-intensity", `${fillIntensity}%`);
+    bar.style.setProperty("--bar-border-intensity", `${borderIntensity}%`);
+    bar.style.setProperty("--bar-estimated-intensity", `${estimatedIntensity}%`);
+    bar.setAttribute("aria-label", `${item.label}: ${item.displayValue}, ${item.secondaryValue}`);
+    bar.addEventListener("mouseenter", (event) => showUsageChartTooltip(event, item));
+    bar.addEventListener("mousemove", (event) => moveChartTooltip(event));
+    bar.addEventListener("mouseleave", hideChartTooltip);
+    bar.addEventListener("focus", (event) => showUsageChartTooltip(event, item));
+    bar.addEventListener("blur", hideChartTooltip);
+    column.append(bar);
+    if (item.showLabel) {
+      const label = document.createElement("span");
+      label.className = "chart-x-label";
+      label.textContent = item.label;
+      column.append(label);
+    }
+    plot.append(column);
+  }
+
+  elements.dailyChart.append(yAxis, plot);
+}
+
+function renderUsageChart(stats) {
+  syncChartMode(stats);
+  let config;
+  if (currentChartMode === "tokens") {
+    config = buildTokenBars(stats);
+  } else {
+    const minutes = chartModeWindowMinutes(currentChartMode);
+    const history = rateLimitHistoryByMinutes(stats, minutes);
+    config = history?.points?.length > 1
+      ? buildRateLimitBars(stats, minutes)
+      : buildRateLimitHistoryPending(stats, minutes);
+  }
+
+  elements.activityTitle.textContent = currentChartMode === "tokens" ? t("activityTrend", { days: stats.settings?.chartDays || currentSettings.chartDays }) : t("quotaConsumption");
+  elements.chartSourceLabel.textContent = config.sourceLabel;
+  renderChartHelp();
+  elements.chartInterpretation.textContent = config.interpretation;
+  renderChartLegend(config.legend);
+  renderUsageBarChart(config);
+}
+
+function renderChartHelp() {
+  const descriptionKey = currentChartMode === "tokens"
+    ? "chartHelpTokens"
+    : currentChartMode === "five-hour"
+      ? "chartHelpFiveHour"
+      : "chartHelpWeekly";
+  elements.chartHelpButton.setAttribute("aria-label", t("chartHelp"));
+  elements.chartHelpButton.setAttribute("title", t("chartHelp"));
+  elements.chartHelpTitle.textContent = t("chartHelpTitle");
+  elements.chartHelpText.textContent = `${t(descriptionKey)} ${t("chartHelpColor")}`;
+}
+
+function setChartHelpOpen(open) {
+  const shouldOpen = Boolean(open);
+  elements.chartHelpPopover.hidden = !shouldOpen;
+  elements.chartHelpButton.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+function showUsageChartTooltip(event, item) {
   const date = document.createElement("strong");
-  date.textContent = day.date;
+  date.textContent = item.label;
 
   const tokens = document.createElement("span");
-  tokens.textContent = `${formatCompact(day.tokens)} ${t("tokens")}`;
+  tokens.textContent = item.displayValue;
 
   const cost = document.createElement("span");
-  cost.textContent = formatCurrency(day.cost);
+  cost.textContent = item.secondaryValue;
 
   elements.chartTooltip.replaceChildren(date, tokens, cost);
   elements.chartTooltip.hidden = false;
@@ -1753,19 +2415,184 @@ function renderRecentThreads(threads) {
     const row = document.createElement("div");
     row.className = "thread-row";
 
-    const main = document.createElement("div");
+    const time = document.createElement("span");
+    time.className = "thread-time";
+    time.textContent = formatTime(thread.updatedAt);
+
     const title = document.createElement("strong");
+    title.className = "thread-title";
     title.textContent = thread.title || t("untitled");
-    const meta = document.createElement("span");
-    meta.textContent = `${thread.model} · ${displaySourceName(thread.source)} · ${formatDate(thread.updatedAt)}`;
-    main.append(title, meta);
+
+    const workspace = document.createElement("span");
+    workspace.className = "thread-workspace";
+    const normalizedCwd = String(thread.cwd || "").replace(/[\\/]+$/, "");
+    workspace.textContent = normalizedCwd.split(/[\\/]/).pop() || displaySourceName(thread.source);
+
+    const model = document.createElement("span");
+    model.className = "thread-model";
+    model.textContent = thread.model || t("unknown");
 
     const tokens = document.createElement("span");
     tokens.className = "thread-token";
     tokens.textContent = formatCompact(thread.tokensUsed);
 
-    row.append(main, tokens);
+    row.append(time, title, workspace, model, tokens);
     elements.recentThreads.append(row);
+  }
+}
+
+function formatInsightDay(value) {
+  if (!value) return "-";
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(localeForLanguage(), {
+    month: currentLanguage() === "zh" ? "long" : "short",
+    day: "numeric"
+  }).format(date);
+}
+
+function renderInsightSparkline(values = []) {
+  const canvas = elements.insightSparkline;
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(120, Math.round(rect.width || 180));
+  const height = Math.max(24, Math.round(rect.height || 30));
+  const scale = Math.max(1, window.devicePixelRatio || 1);
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+
+  const points = values.map((value) => Math.max(0, Number(value) || 0));
+  if (points.length < 2 || !points.some((value) => value > 0)) return;
+
+  const max = Math.max(...points, 1);
+  const min = Math.min(...points);
+  const range = Math.max(1, max - min);
+  const inset = 2 * scale;
+  context.beginPath();
+  points.forEach((value, index) => {
+    const x = inset + (index / (points.length - 1)) * (canvas.width - inset * 2);
+    const y = inset + (1 - (value - min) / range) * (canvas.height - inset * 2);
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  context.lineWidth = 1.75 * scale;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.strokeStyle = getComputedStyle(document.body).getPropertyValue("--bar-mid").trim() || "#85c1e9";
+  context.stroke();
+}
+
+function renderUsageInsights(stats, fallbackDays = currentSettings.chartDays || 30) {
+  const days = Array.isArray(stats?.dailySeries) ? stats.dailySeries : [];
+  const chartDays = stats?.settings?.chartDays || fallbackDays;
+  const recentValues = days.slice(-14).map((day) => Number(day.tokens) || 0);
+  const recentSeven = recentValues.slice(-7).reduce((sum, value) => sum + value, 0);
+  const previousSeven = recentValues.slice(-14, -7).reduce((sum, value) => sum + value, 0);
+  const hasComparison = recentValues.length >= 14 && previousSeven > 0;
+  const trendPercent = hasComparison ? ((recentSeven - previousSeven) / previousSeven) * 100 : null;
+
+  elements.usageInsightsTitle.textContent = t("usageInsights");
+  elements.usageInsightsMeta.textContent = t("usageInsightsMeta");
+  elements.insightTrendLabel.textContent = t("insightTrendLabel");
+  elements.insightTrendValue.textContent = trendPercent === null
+    ? "-"
+    : `${trendPercent >= 0 ? "+" : ""}${Math.round(trendPercent)}%`;
+  elements.insightTrendValue.classList.toggle("negative", Number(trendPercent) < 0);
+  elements.insightTrendNote.classList.remove("attention", "positive");
+  if (trendPercent === null) {
+    elements.insightTrendNote.textContent = t("insightTrendUnavailable");
+  } else if (trendPercent >= 8) {
+    elements.insightTrendNote.textContent = t("insightTrendUp");
+    elements.insightTrendNote.classList.add("attention");
+  } else if (trendPercent <= -8) {
+    elements.insightTrendNote.textContent = t("insightTrendDown");
+    elements.insightTrendNote.classList.add("positive");
+  } else {
+    elements.insightTrendNote.textContent = t("insightTrendSteady");
+  }
+  renderInsightSparkline(recentValues);
+
+  const totalPeriodTokens = days.reduce((sum, day) => sum + (Number(day.tokens) || 0), 0);
+  const peakDay = days.reduce((peak, day) => {
+    return (Number(day.tokens) || 0) > (Number(peak?.tokens) || 0) ? day : peak;
+  }, null);
+  const dailyAverage = days.length ? totalPeriodTokens / days.length : 0;
+  const peakRatio = dailyAverage > 0 ? (Number(peakDay?.tokens) || 0) / dailyAverage : 0;
+  elements.insightPeakLabel.textContent = t("insightPeakLabel", { days: chartDays });
+  elements.insightPeakValue.textContent = peakDay && Number(peakDay.tokens) > 0
+    ? `${formatInsightDay(peakDay.date)} · ${formatCompact(peakDay.tokens)}`
+    : "-";
+  elements.insightPeakNote.textContent = peakRatio > 0
+    ? t("insightPeakNote", { ratio: peakRatio.toFixed(1).replace(/\.0$/, "") })
+    : t("insightNoData");
+
+  const topWorkspace = Array.isArray(stats?.workspaces) ? stats.workspaces[0] : null;
+  const totalTokens = Number(stats?.totals?.totalTokens) || 0;
+  const workspaceShare = topWorkspace && totalTokens > 0
+    ? Math.min(100, Math.max(0, (Number(topWorkspace.value) || 0) / totalTokens * 100))
+    : 0;
+  elements.insightWorkspaceLabel.textContent = t("insightWorkspaceLabel");
+  elements.insightWorkspaceValue.textContent = topWorkspace
+    ? `${topWorkspace.name} · ${Math.round(workspaceShare)}%`
+    : "-";
+  elements.insightWorkspaceNote.textContent = topWorkspace
+    ? t(workspaceShare >= 50 ? "insightWorkspaceConcentrated" : "insightWorkspaceBalanced")
+    : t("insightNoData");
+  elements.insightWorkspaceValue.setAttribute("title", t("insightWorkspaceHint"));
+  elements.insightWorkspaceNote.setAttribute("title", t("insightWorkspaceHint"));
+}
+
+function timeGreeting(date = new Date()) {
+  const hour = date.getHours();
+  if (currentLanguage() === "zh") {
+    if (hour >= 5 && hour < 9) return "早上好";
+    if (hour >= 9 && hour < 12) return "上午好";
+    if (hour >= 12 && hour < 14) return "中午好";
+    if (hour >= 14 && hour < 18) return "下午好";
+    if (hour >= 18 && hour < 23) return "晚上好";
+    return "夜深了";
+  }
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 18) return "Good afternoon";
+  if (hour >= 18 && hour < 23) return "Good evening";
+  return "It's getting late";
+}
+
+function friendlyStatus(message) {
+  return `${timeGreeting()}${currentLanguage() === "zh" ? "，" : ". "}${message}`;
+}
+
+function renderBriefMeta(stats) {
+  const provider = PROVIDERS[currentSettings.activeProvider] || PROVIDERS.codex;
+  const windows = availableRateLimitWindows(stats?.rateLimits);
+  const official = currentSettings.activeProvider === "codex" && stats?.rateLimits?.planType !== "local_estimate";
+  const allSafe = windows.length > 0 && windows.every((window) => Number(window.remainingPercent) >= 30);
+
+  setProviderImage(elements.headerProviderLogo, currentSettings.activeProvider);
+  elements.headerProviderLabel.textContent = provider.label;
+  elements.quotaSourceBadge.textContent = official ? t("officialQuota") : t("localEstimate");
+  elements.activityMeta.textContent = `${formatNumber(stats?.latestThreads?.length || 0)} ${currentLanguage() === "zh" ? "条本地记录" : "local records"}`;
+
+  if (currentSettings.activeProvider === "chatgpt") {
+    elements.statusHeading.textContent = friendlyStatus(currentLanguage() === "zh" ? "近期活动已经同步" : "Recent activity is synced");
+    elements.quotaSourceBadge.textContent = t("localActivityEstimate");
+  } else if (!windows.length) {
+    elements.statusHeading.textContent = friendlyStatus(currentLanguage() === "zh" ? "额度数据还在同步" : "Quota data is still syncing");
+  } else if (allSafe) {
+    elements.statusHeading.textContent = friendlyStatus(
+      currentLanguage() === "zh"
+        ? windows.length > 1
+          ? "当前两个额度窗口均安全"
+          : "当前额度窗口状态安全"
+        : windows.length > 1
+          ? "Both quota windows are in good shape"
+          : "The current quota window is in good shape"
+    );
+  } else {
+    elements.statusHeading.textContent = friendlyStatus(
+      currentLanguage() === "zh" ? "有额度窗口需要关注" : "A quota window needs attention"
+    );
   }
 }
 
@@ -1774,38 +2601,44 @@ function renderStats(stats) {
   lastStats = stats;
   const chartDays = stats.settings?.chartDays || currentSettings.chartDays;
   const mainLimit = primaryRateLimit(stats);
+  const mainActivity = primaryActivityWindow(stats);
+  const isChatgpt = currentSettings.activeProvider === "chatgpt";
   const provider = PROVIDERS[currentSettings.activeProvider] || PROVIDERS.codex;
   renderError(stats.error);
 
   elements.overviewProvider.textContent = provider.label;
-  elements.overviewProviderLogo.src = provider.icon;
+  setProviderImage(elements.overviewProviderLogo, currentSettings.activeProvider);
+  setProviderImage(elements.headerProviderLogo, currentSettings.activeProvider);
+  elements.headerProviderLabel.textContent = provider.label;
   elements.overviewAccountName.textContent = stats.account?.displayName || provider.label;
   elements.overviewAccountPlan.textContent = stats.account?.planLabel || provider.label;
   applyProviderEstimateText(currentSettings.activeProvider);
   elements.periodTokensLabel.textContent = t("periodTokens", { days: chartDays });
-  elements.periodUsagePercent.dataset.periodLabel = t("periodAccumulated", { days: chartDays });
+  elements.periodUsageMeta.dataset.periodLabel = t("periodAccumulated", { days: chartDays });
   elements.activityTitle.textContent = t("activityTrend", { days: chartDays });
-  elements.overviewPeriod.textContent = t("daysPeriod", { days: chartDays });
+  elements.overviewPeriodLabel.textContent = t("daysPeriod", { days: chartDays });
   renderCostMetricLabels(chartDays);
   renderCostMetricValues(stats);
   elements.periodTokensContext.textContent = t("periodTokenContext", {
     total: formatCompact(stats.totals.totalTokens),
     latest: formatCompact(stats.featured.latestTokenUsage)
   });
-  elements.periodUsagePercent.textContent = Number.isFinite(stats.featured.periodUsagePercent)
-    ? t("percentUsage", {
-        percent: Math.round(stats.featured.periodUsagePercent),
-        plan: stats.account?.planLabel || ""
-      })
-    : t("usageEstimated");
-  elements.periodTokens.closest(".hero-metric")?.style.setProperty(
-    "--usage-progress",
-    `${Number.isFinite(stats.featured.periodUsagePercent) ? Math.min(100, Math.max(0, stats.featured.periodUsagePercent)) : 0}%`
-  );
-  elements.sidebarRemainingUsage.textContent = mainLimit ? formatPercent(mainLimit.remainingPercent) : "-";
-  elements.sidebarPeriodMeta.textContent = mainLimit
-    ? formatLimitMeta(mainLimit)
-    : t("waitingForLogs", { provider: provider.label });
+  elements.periodUsageMeta.textContent = t("localRecordsOnly");
+  elements.sidebarUsageLabel.textContent = isChatgpt ? t("recentActivity") : t("remainingUsage");
+  elements.sidebarRemainingUsage.textContent = isChatgpt
+    ? mainActivity
+      ? t("activityCount", { count: formatNumber(mainActivity.count) })
+      : "-"
+    : mainLimit
+      ? formatPercent(mainLimit.remainingPercent)
+      : "-";
+  elements.sidebarPeriodMeta.textContent = isChatgpt
+    ? mainActivity
+      ? formatLimitLabel(mainActivity)
+      : t("waitingForLogs", { provider: provider.label })
+    : mainLimit
+      ? formatLimitMeta(mainLimit)
+      : t("waitingForLogs", { provider: provider.label });
   elements.periodTokens.textContent = formatCompact(stats.featured.periodTokens);
   elements.todayTokens.textContent = formatCompact(stats.featured.todayTokens);
   updateTodayTokensMeter(statsRatioPercent(stats.featured.todayTokens, stats.featured.periodTokens));
@@ -1819,8 +2652,14 @@ function renderStats(stats) {
   elements.accountName.textContent = stats.account?.displayName || provider.label;
   elements.accountPlan.textContent = stats.account?.planLabel || provider.label;
 
-  renderDailyChart(stats.dailySeries);
-  renderRateLimits(stats.rateLimits);
+  if (isChatgpt) {
+    renderActivity(stats.activity);
+  } else {
+    renderRateLimits(stats.rateLimits);
+  }
+  renderUsageChart(stats);
+  renderBriefMeta(stats);
+  renderUsageInsights(stats);
   renderRankList(elements.modelList, stats.models, { compact: true });
   renderRankList(elements.sourceList, stats.sources, { formatName: displaySourceName });
   renderRankList(elements.workspaceList, stats.workspaces, { compact: true });
@@ -2065,9 +2904,26 @@ elements.refreshButton.addEventListener("click", async () => {
   await refreshStats({ force: true });
   resetAutoRefreshTimer();
 });
+elements.providerMenuButton.addEventListener("click", () => {
+  setProviderMenuOpen(elements.sidebarProviderSection.hidden);
+});
+elements.chartHelpButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setChartHelpOpen(elements.chartHelpPopover.hidden);
+});
+elements.chartHelpPopover.addEventListener("click", (event) => event.stopPropagation());
+document.addEventListener("click", () => setChartHelpOpen(false));
 elements.settingsButton.addEventListener("click", () => setView("settings"));
-elements.homeButton.addEventListener("click", () => setView("home"));
-elements.settingsBackButton.addEventListener("click", () => setView("home"));
+elements.homeButton.addEventListener("click", () => setHomeSection("summary"));
+elements.trendButton.addEventListener("click", () => setHomeSection("trend"));
+elements.activityButton.addEventListener("click", () => setHomeSection("activity"));
+elements.settingsBackButton.addEventListener("click", () => setHomeSection("summary"));
+elements.overviewPeriod.addEventListener("click", async () => {
+  const presets = [7, 30, 90];
+  const currentIndex = presets.indexOf(Number(currentSettings.chartDays));
+  const nextDays = presets[(currentIndex + 1 + presets.length) % presets.length];
+  await saveSettings({ chartDays: nextDays });
+});
 elements.repositoryLink.addEventListener("click", (event) => openProjectLink(event, REPOSITORY_URL));
 elements.issueLink.addEventListener("click", (event) => openProjectLink(event, ISSUE_URL));
 elements.rebuildCacheButton.addEventListener("click", rebuildCurrentProviderCache);
@@ -2079,6 +2935,8 @@ elements.chooseChatgptHomeButton.addEventListener("click", () => chooseHome("cha
 for (const button of elements.providerButtons) {
   button.addEventListener("click", async () => {
     if (!isProviderEnabled(button.dataset.provider)) return;
+    currentChartMode = "tokens";
+    setProviderMenuOpen(false);
     await saveSettings({ activeProvider: button.dataset.provider });
   });
   button.addEventListener("keydown", async (event) => {
@@ -2094,6 +2952,29 @@ for (const button of elements.providerButtons) {
     await focusProviderByDirection(button.dataset.provider, direction);
   });
 }
+for (const button of elements.chartModeButtons) {
+  button.addEventListener("click", () => {
+    if (button.disabled || !lastStats) return;
+    currentChartMode = button.dataset.chartMode;
+    renderUsageChart(lastStats);
+  });
+  button.addEventListener("keydown", (event) => {
+    if (!lastStats || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const enabled = elements.chartModeButtons.filter((candidate) => !candidate.disabled);
+    const currentIndex = enabled.indexOf(button);
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const next = enabled[(currentIndex + direction + enabled.length) % enabled.length];
+    next.focus();
+    next.click();
+  });
+}
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  if (!target?.closest(".provider-switcher")) {
+    setProviderMenuOpen(false);
+  }
+});
 for (const input of elements.enabledProviderInputs) {
   input.addEventListener("change", async () => {
     const previousActiveProvider = currentSettings.activeProvider;
@@ -2122,10 +3003,21 @@ for (const button of elements.settingsNavButtons) {
     const sectionId = button.dataset.settingsSection;
     const section = document.getElementById(sectionId);
     if (!section) return;
-    activateSettingsNav(sectionId);
-    section.scrollIntoView({ block: "start", behavior: "smooth" });
+    clearSettingsSearch();
+    activateSettingsNav(sectionId, { scroll: true });
   });
 }
+elements.settingsProvidersTab.addEventListener("click", () => {
+  const preferredProvider = elements.settingsProviderNavButtons.find(
+    (button) => button.dataset.settingsProvider === currentSettings.activeProvider
+  );
+  const fallbackProvider = elements.settingsProviderNavButtons[0];
+  const sectionId = preferredProvider?.dataset.settingsSection || fallbackProvider?.dataset.settingsSection;
+  if (!sectionId) return;
+  clearSettingsSearch();
+  activateSettingsNav(sectionId, { scroll: true });
+});
+elements.settingsSearchInput.addEventListener("input", updateSettingsSectionVisibility);
 elements.themeSelect.addEventListener("change", async () => {
   await saveSettings({ theme: elements.themeSelect.value }, false);
 });
@@ -2170,8 +3062,32 @@ window.addEventListener("languagechange", () => {
   }
 });
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !elements.updateDialog.hidden) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f" && currentView === "settings") {
+    event.preventDefault();
+    elements.settingsSearchInput.focus();
+    elements.settingsSearchInput.select();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && currentView === "home") {
+    event.preventDefault();
+    setProviderMenuOpen(elements.sidebarProviderSection.hidden);
+    if (!elements.sidebarProviderSection.hidden) {
+      elements.providerButtons.find((button) => !button.hidden)?.focus();
+    }
+    return;
+  }
+  if (event.key === "Escape" && currentView === "settings" && elements.settingsSearchInput.value) {
+    clearSettingsSearch();
+    updateSettingsSectionVisibility();
+    elements.settingsSearchInput.focus();
+  } else if (event.key === "Escape" && !elements.chartHelpPopover.hidden) {
+    setChartHelpOpen(false);
+    elements.chartHelpButton.focus();
+  } else if (event.key === "Escape" && !elements.updateDialog.hidden) {
     closeUpdateDialog();
+  } else if (event.key === "Escape" && !elements.sidebarProviderSection.hidden) {
+    setProviderMenuOpen(false);
+    elements.providerMenuButton.focus();
   }
 });
 

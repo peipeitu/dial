@@ -48,7 +48,7 @@ function assetUrl(repo, tag, file) {
 
 const artifactsDir = path.resolve(argValue("--artifacts", path.join(root, "release-artifacts")));
 const outputPath = path.resolve(argValue("--output", path.join(artifactsDir, "latest.json")));
-const repo = argValue("--repo", process.env.GITHUB_REPOSITORY || "peipeitu/ai-usage");
+const repo = argValue("--repo", process.env.GITHUB_REPOSITORY || "peipeitu/dial");
 const tag = argValue("--tag", process.env.GITHUB_REF_NAME || `v${packageJson.version}`);
 const version = tag.replace(/^v/, "") || packageJson.version;
 const files = walkFiles(artifactsDir);
@@ -66,7 +66,7 @@ const linuxAppImage = findOne(
 
 const latest = {
   version,
-  notes: `AI Usage ${version}`,
+  notes: `Dial ${version}`,
   pub_date: new Date().toISOString(),
   platforms: {
     "windows-x86_64": {

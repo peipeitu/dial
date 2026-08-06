@@ -13,6 +13,7 @@ const elements = {
   openButton: document.getElementById("openButton")
 };
 
+const bundledAssets = window.__AI_USAGE_ASSETS__ || {};
 const providerAssets = new Set(["codex", "claude", "copilot", "cursor", "chatgpt"]);
 const themes = new Set(["light", "dark"]);
 const accents = new Set(["blue", "turquoise", "green", "purple", "red", "orange", "graphite"]);
@@ -38,8 +39,8 @@ function renderStatus(status) {
   }
   document.body.dataset.accent = accents.has(status?.accentColor) ? status.accentColor : "blue";
 
-  elements.providerIcon.src = `./assets/provider-${provider}.svg`;
-  elements.providerName.textContent = status?.providerLabel || "AI Usage";
+  elements.providerIcon.src = bundledAssets[provider] || `./assets/provider-${provider}.svg`;
+  elements.providerName.textContent = status?.providerLabel || "Dial";
   elements.usageLabel.textContent = status?.usageLabel || "剩余用量";
   elements.openButton.textContent = status?.openLabel || "打开详情";
   elements.usageValue.textContent = available ? `${percent}%` : "--";

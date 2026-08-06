@@ -19,11 +19,11 @@ function manifestFixture() {
     platforms: {
       "windows-x86_64": {
         signature: encodedSignature,
-        url: "https://github.com/owner/repo/releases/download/v1.2.3/AI.Usage_1.2.3_x64-setup.exe",
+        url: "https://github.com/owner/repo/releases/download/v1.2.3/Dial_1.2.3_x64-setup.exe",
       },
       "linux-x86_64": {
         signature: encodedSignature,
-        url: "https://github.com/owner/repo/releases/download/v1.2.3/AI.Usage_1.2.3_amd64.AppImage",
+        url: "https://github.com/owner/repo/releases/download/v1.2.3/Dial_1.2.3_amd64.AppImage",
       },
     },
   };
@@ -46,10 +46,10 @@ function mockResponse({ status = 200, json, text = "", data = Buffer.alloc(0) } 
   };
 }
 
-test("manifest validation rejects asset names that GitHub normalizes", () => {
+test("manifest validation rejects asset names with whitespace", () => {
   const manifest = manifestFixture();
   manifest.platforms["windows-x86_64"].url =
-    "https://github.com/owner/repo/releases/download/v1.2.3/AI%20Usage_1.2.3_x64-setup.exe";
+    "https://github.com/owner/repo/releases/download/v1.2.3/Dial%20Setup_1.2.3_x64.exe";
 
   assert.throws(
     () => validateManifest(manifest, "owner/repo", "v1.2.3"),

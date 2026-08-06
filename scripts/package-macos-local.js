@@ -10,7 +10,7 @@ const appBundle = path.join(
   "release",
   "bundle",
   "macos",
-  "AI Usage.app"
+  "Dial.app"
 );
 
 function run(command, args) {

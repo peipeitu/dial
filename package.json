@@ -1,8 +1,8 @@
 {
-  "name": "ai-usage",
-  "version": "0.1.8",
+  "name": "dial",
+  "version": "0.1.9",
   "description": "A cross-platform desktop dashboard for local AI coding usage statistics.",
-  "desktopName": "ai-usage",
+  "desktopName": "dial",
   "license": "MIT",
   "author": {
     "name": "peipeitu",
@@ -10,22 +10,25 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/peipeitu/ai-usage.git"
+    "url": "git+https://github.com/peipeitu/dial.git"
   },
   "bugs": {
-    "url": "https://github.com/peipeitu/ai-usage/issues"
+    "url": "https://github.com/peipeitu/dial/issues"
   },
-  "homepage": "https://github.com/peipeitu/ai-usage#readme",
+  "homepage": "https://github.com/peipeitu/dial#readme",
   "type": "commonjs",
   "scripts": {
     "dev": "tauri dev",
     "start": "tauri dev",
+    "frontend:dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "frontend:build": "vite build",
+    "build": "vite build",
     "icons": "node scripts/generate-icons.js",
     "updater:latest": "node scripts/write-latest-json.js",
     "updater:verify-signatures": "node scripts/verify-updater-signatures.js",
     "release:check": "node scripts/check-release.js",
     "release:verify": "node scripts/verify-updater-release.js",
-    "test": "node --check src/renderer/renderer.js && node --check src/renderer/tray.js && node --check scripts/check-release.js && node --check scripts/package-macos-local.js && node --check scripts/release-policy.js && node --check scripts/write-updater-config.js && node --check scripts/write-latest-json.js && node --check scripts/verify-updater-release.js && node --check scripts/verify-updater-signatures.js && node --test tests/renderer.test.js tests/tray.test.js tests/release-check.test.js tests/release-policy.test.js tests/updater-manifest.test.js tests/updater-release.test.js tests/updater-signature.test.js && cargo test --manifest-path src-tauri/Cargo.toml",
+    "test": "node --check src/renderer/renderer.js && node --check src/renderer/tray.js && node --check scripts/check-release.js && node --check scripts/package-macos-local.js && node --check scripts/release-policy.js && node --check scripts/write-updater-config.js && node --check scripts/write-latest-json.js && node --check scripts/verify-updater-release.js && node --check scripts/verify-updater-signatures.js && node --test tests/renderer.test.js tests/tray.test.js tests/release-check.test.js tests/release-policy.test.js tests/updater-manifest.test.js tests/updater-release.test.js tests/updater-signature.test.js && vite build && cargo test --manifest-path src-tauri/Cargo.toml",
     "fmt:check": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
     "lint": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "package:mac": "node scripts/package-macos-local.js",
@@ -34,8 +37,16 @@
     "package:linux": "node scripts/write-updater-config.js && tauri build --config src-tauri/tauri.updater.generated.conf.json --bundles appimage,deb",
     "package:linux:unsigned": "tauri build --bundles appimage,deb"
   },
-  "dependencies": {},
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0"
+    "@tabler/icons": "^3.45.0",
+    "@tauri-apps/cli": "^2.0.0",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "vite": "^8.1.5"
+  },
+  "dependencies": {
+    "vue": "^3.5.40"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   }
 }

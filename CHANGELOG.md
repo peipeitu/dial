@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.9 - 2026-08-06
+
+- Rename the product and repository from AI Usage to Dial while retaining the existing application identifier and local data locations for seamless upgrades.
+- Redesign the dashboard and settings experience with Vue 3 and Vite, compact navigation, segmented quota meters, responsive usage charts, and theme-aware branding assets.
+- Keep official quota windows separate from local activity data, hide unavailable five-hour limits, and show an explicit history-pending state instead of inferring quota bars from recent sessions.
+- Preserve scan cache diagnostics and cache rebuilding in the redesigned settings interface, and declare the Node.js versions required by the Vite toolchain.
+
 ## 0.1.8 - 2026-07-25
 
 - Add a dedicated today token metric with period-share progress while keeping the latest token context in the featured summary.
@@ -24,7 +31,7 @@
 
 ## 0.1.5 - 2026-07-09
 
-- Preserve Codex daily usage history in an AI Usage snapshot so deleted local Codex sessions no longer shrink previously observed trend totals.
+- Preserve Codex daily usage history in a Dial snapshot so deleted local Codex sessions no longer shrink previously observed trend totals.
 - Add quota pace indicators with theoretical usage markers, headroom or overrun status, and projected exhaustion timing for usage windows.
 - Update dependency versions for the Tauri app and fix Codex token count conversion with newer rusqlite releases.
 - Add an in-app updater experience and reduce temporary release artifact retention to one day.

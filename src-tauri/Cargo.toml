@@ -1,10 +1,10 @@
 [package]
-name = "ai-usage"
-version = "0.1.8"
+name = "dial"
+version = "0.1.9"
 description = "A cross-platform desktop dashboard for local AI coding usage statistics."
 authors = ["peipeitu <peipeitu@users.noreply.github.com>"]
 license = "MIT"
-repository = "https://github.com/peipeitu/ai-usage"
+repository = "https://github.com/peipeitu/dial"
 edition = "2021"
 
 [build-dependencies]

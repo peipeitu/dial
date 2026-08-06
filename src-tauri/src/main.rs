@@ -40,7 +40,7 @@ use windows::Win32::{
 
 #[cfg(any(windows, target_os = "linux"))]
 const UPDATE_ENDPOINT: &str =
-    "https://github.com/peipeitu/ai-usage/releases/latest/download/latest.json";
+    "https://github.com/peipeitu/dial/releases/latest/download/latest.json";
 const MIN_CHART_DAYS: u32 = 7;
 const DEFAULT_CHART_DAYS: u32 = 30;
 const MAX_CHART_DAYS: u32 = 90;
@@ -53,8 +53,6 @@ const DEFAULT_SCAN_MAX_FILES: usize = 20_000;
 const CHATGPT_SQLITE_ROW_SCAN_LIMIT: usize = 2_000;
 const CLAUDE_ESTIMATED_5H_TOKEN_LIMIT: u64 = 500_000;
 const CLAUDE_ESTIMATED_WEEKLY_TOKEN_LIMIT: u64 = 2_500_000;
-const CHATGPT_ESTIMATED_3H_ACTIVITY_LIMIT: u64 = 80;
-const CHATGPT_ESTIMATED_WEEKLY_ACTIVITY_LIMIT: u64 = 500;
 const TRAY_ID: &str = "ai-usage-status";
 const TRAY_STATUS_WINDOW_LABEL: &str = "tray-status";
 const TRAY_OPEN_MENU_ID: &str = "tray-open";
@@ -208,7 +206,6 @@ struct Featured {
     period_cost: f64,
     period_tokens: u64,
     latest_token_usage: u64,
-    period_usage_percent: Option<f64>,
     cost_available: bool,
     cost_estimated_from_token_events: bool,
 }
@@ -273,6 +270,42 @@ struct RateLimits {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct RateLimitHistoryPoint {
+    timestamp: String,
+    used_percent: f64,
+    remaining_percent: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RateLimitHistorySeries {
+    id: String,
+    label: String,
+    window_minutes: u64,
+    points: Vec<RateLimitHistoryPoint>,
+}
+
+type RawRateLimitHistoryPoint = (i64, f64, f64);
+type RateLimitHistoryGroups = HashMap<(String, u64), (String, Vec<RawRateLimitHistoryPoint>)>;
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActivityWindow {
+    id: String,
+    label: String,
+    count: u64,
+    window_minutes: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActivitySummary {
+    updated_at: Option<String>,
+    windows: Vec<ActivityWindow>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Stats {
     generated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -283,6 +316,8 @@ struct Stats {
     pricing: Option<Pricing>,
     featured: Featured,
     rate_limits: Option<RateLimits>,
+    rate_limit_history: Vec<RateLimitHistorySeries>,
+    activity: Option<ActivitySummary>,
     totals: Totals,
     daily_series: Vec<DailyPoint>,
     models: Vec<RankItem>,
@@ -695,8 +730,8 @@ fn tray_language(language: &str) -> TrayLanguage {
 
 fn tray_menu_labels(language: TrayLanguage) -> (&'static str, &'static str) {
     match language {
-        TrayLanguage::Zh => ("打开 AI Usage", "退出"),
-        TrayLanguage::En => ("Open AI Usage", "Quit"),
+        TrayLanguage::Zh => ("打开 Dial", "退出"),
+        TrayLanguage::En => ("Open Dial", "Quit"),
     }
 }
 
@@ -722,12 +757,12 @@ fn tray_tooltip(display: &TrayDisplayState) -> String {
     let provider = provider_label(&display.active_provider);
     match (display.language, display.remaining_percent) {
         (TrayLanguage::Zh, Some(percent)) => {
-            format!("AI Usage · {provider} · 剩余 {percent}%")
+            format!("Dial · {provider} · 剩余 {percent}%")
         }
         (TrayLanguage::En, Some(percent)) => {
-            format!("AI Usage · {provider} · {percent}% remaining")
+            format!("Dial · {provider} · {percent}% remaining")
         }
-        (_, None) => format!("AI Usage · {provider}"),
+        (_, None) => format!("Dial · {provider}"),
     }
 }
 
@@ -1282,7 +1317,26 @@ fn paint_tray_icon_segment(rgba: &mut [u8], start: (i32, i32), end: (i32, i32)) 
     for step in 0..=steps {
         let x = start.0 + (end.0 - start.0) * step / steps;
         let y = start.1 + (end.1 - start.1) * step / steps;
-        paint_tray_icon_disc(rgba, x, y, 2);
+        paint_tray_icon_disc(rgba, x, y, 1);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn paint_tray_icon_arc(
+    rgba: &mut [u8],
+    center: (i32, i32),
+    radius: f32,
+    start_degrees: f32,
+    end_degrees: f32,
+) {
+    let sweep = (end_degrees - start_degrees).abs();
+    let steps = ((sweep / 360.0 * 96.0).ceil() as i32).max(1);
+    for step in 0..=steps {
+        let progress = step as f32 / steps as f32;
+        let angle = (start_degrees + (end_degrees - start_degrees) * progress).to_radians();
+        let x = center.0 + (radius * angle.cos()).round() as i32;
+        let y = center.1 + (radius * angle.sin()).round() as i32;
+        paint_tray_icon_disc(rgba, x, y, 1);
     }
 }
 
@@ -1290,19 +1344,13 @@ fn paint_tray_icon_segment(rgba: &mut [u8], start: (i32, i32), end: (i32, i32)) 
 fn tray_template_icon() -> tauri::image::Image<'static> {
     const SIZE: usize = 32;
     let mut rgba = vec![0_u8; SIZE * SIZE * 4];
-    let points = [
-        (2, 16),
-        (8, 16),
-        (11, 7),
-        (16, 25),
-        (21, 11),
-        (25, 16),
-        (30, 16),
-    ];
 
-    for segment in points.windows(2) {
-        paint_tray_icon_segment(&mut rgba, segment[0], segment[1]);
+    for (start_degrees, end_degrees) in [(150.0, 210.0), (232.0, 308.0), (330.0, 390.0)] {
+        paint_tray_icon_arc(&mut rgba, (16, 18), 11.0, start_degrees, end_degrees);
     }
+
+    paint_tray_icon_segment(&mut rgba, (16, 19), (22, 13));
+    paint_tray_icon_disc(&mut rgba, 16, 19, 2);
 
     tauri::image::Image::new_owned(rgba, SIZE as u32, SIZE as u32)
 }
@@ -1328,7 +1376,7 @@ fn create_tray_status_window(app: &tauri::App) -> Result<(), Box<dyn std::error:
         TRAY_STATUS_WINDOW_LABEL,
         tauri::WebviewUrl::App("tray.html".into()),
     )
-    .title("AI Usage Status")
+    .title("Dial Status")
     .inner_size(320.0, 156.0)
     .resizable(false)
     .maximizable(false)
@@ -1359,7 +1407,7 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .title("--%")
-        .tooltip("AI Usage")
+        .tooltip("Dial")
         .on_menu_event(|app, event| match event.id().as_ref() {
             TRAY_OPEN_MENU_ID => show_main_window(app),
             TRAY_QUIT_MENU_ID => app.exit(0),
@@ -1644,8 +1692,8 @@ fn start_window_drag(window: tauri::Window) -> Result<(), String> {
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
     let allowed_urls = [
-        "https://github.com/peipeitu/ai-usage",
-        "https://github.com/peipeitu/ai-usage/issues",
+        "https://github.com/peipeitu/dial",
+        "https://github.com/peipeitu/dial/issues",
     ];
 
     if !allowed_urls.contains(&url.as_str()) {
@@ -2125,6 +2173,67 @@ fn normalize_rate_limits(rate_limits: Option<&Value>, timestamp_ms: i64) -> Opti
     })
 }
 
+fn build_rate_limit_history(
+    usage_events: &[UsageEvent],
+    now_ms: i64,
+) -> Vec<RateLimitHistorySeries> {
+    let mut grouped = RateLimitHistoryGroups::new();
+
+    for event in usage_events {
+        let Some(rate_limits) = event.rate_limits.as_ref() else {
+            continue;
+        };
+
+        for window in &rate_limits.windows {
+            let window_ms = window.window_minutes as i64 * 60 * 1000;
+            if window_ms <= 0 || event.timestamp_ms < now_ms - window_ms {
+                continue;
+            }
+
+            grouped
+                .entry((window.id.clone(), window.window_minutes))
+                .or_insert_with(|| (window.label.clone(), Vec::new()))
+                .1
+                .push((
+                    event.timestamp_ms,
+                    window.used_percent,
+                    window.remaining_percent,
+                ));
+        }
+    }
+
+    let mut series = grouped
+        .into_iter()
+        .map(|((id, window_minutes), (label, mut points))| {
+            points.sort_by_key(|point| point.0);
+            points.dedup_by_key(|point| point.0);
+            if points.len() > 512 {
+                points.drain(0..points.len() - 512);
+            }
+
+            RateLimitHistorySeries {
+                id,
+                label,
+                window_minutes,
+                points: points
+                    .into_iter()
+                    .filter_map(|(timestamp_ms, used_percent, remaining_percent)| {
+                        Some(RateLimitHistoryPoint {
+                            timestamp: iso_from_ms(timestamp_ms)?,
+                            used_percent,
+                            remaining_percent,
+                        })
+                    })
+                    .collect(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    series.retain(|item| !item.points.is_empty());
+    series.sort_by_key(|item| item.window_minutes);
+    series
+}
+
 fn read_codex_usage_events(threads: &[Thread]) -> Vec<UsageEvent> {
     let mut events = Vec::new();
 
@@ -2292,10 +2401,6 @@ fn build_stats_from_threads(
         .filter(|event| event.plan_type.is_some())
         .max_by_key(|event| event.timestamp_ms)
         .and_then(|event| event.plan_type.clone());
-    let plan_monthly_cost = account.plan_monthly_usd;
-    let period_usage_percent = plan_monthly_cost
-        .filter(|cost| *cost > 0.0)
-        .map(|cost| (period_cost / cost) * 100.0);
     let latest_rate_limits = if rate_limits_enabled {
         usage_events
             .iter()
@@ -2304,6 +2409,11 @@ fn build_stats_from_threads(
             .and_then(|event| event.rate_limits.clone())
     } else {
         None
+    };
+    let rate_limit_history = if rate_limits_enabled {
+        build_rate_limit_history(&usage_events, now.timestamp_millis())
+    } else {
+        Vec::new()
     };
 
     let mut daily_series = build_empty_daily_series(chart_days, now);
@@ -2385,11 +2495,12 @@ fn build_stats_from_threads(
             period_cost,
             period_tokens,
             latest_token_usage,
-            period_usage_percent,
             cost_available,
             cost_estimated_from_token_events: has_usage_events,
         },
         rate_limits: latest_rate_limits,
+        rate_limit_history,
+        activity: None,
         totals: Totals {
             threads: threads.len(),
             active_threads,
@@ -2450,11 +2561,12 @@ fn empty_stats(
             period_cost: 0.0,
             period_tokens: 0,
             latest_token_usage: 0,
-            period_usage_percent: None,
             cost_available: false,
             cost_estimated_from_token_events: true,
         },
         rate_limits: None,
+        rate_limit_history: Vec::new(),
+        activity: None,
         totals: Totals {
             threads: 0,
             active_threads: 0,
@@ -2538,11 +2650,6 @@ fn apply_codex_usage_history(
     } else {
         stats.featured.latest_token_usage.max(latest_daily_tokens)
     };
-    stats.featured.period_usage_percent = stats
-        .account
-        .plan_monthly_usd
-        .filter(|cost| *cost > 0.0)
-        .map(|cost| (stats.featured.period_cost / cost) * 100.0);
     stats.featured.cost_available =
         usd_per_million_tokens.is_finite() && usd_per_million_tokens > 0.0;
     if period_tokens > 0 {
@@ -2870,14 +2977,6 @@ fn read_claude_session(path: &Path) -> Option<Thread> {
 }
 
 fn claude_estimated_token_limit(env_key: &str, fallback: u64) -> u64 {
-    env::var(env_key)
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(fallback)
-}
-
-fn chatgpt_estimated_activity_limit(env_key: &str, fallback: u64) -> u64 {
     env::var(env_key)
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
@@ -4121,10 +4220,10 @@ fn try_read_chatgpt_sqlite_threads(path: &Path) -> Result<Vec<Thread>, String> {
     Ok(threads)
 }
 
-fn build_chatgpt_estimated_rate_limits(
+fn build_chatgpt_activity_summary(
     threads: &[Thread],
     now: DateTime<Local>,
-) -> Option<RateLimits> {
+) -> Option<ActivitySummary> {
     if threads.is_empty() {
         return None;
     }
@@ -4152,52 +4251,26 @@ fn build_chatgpt_estimated_rate_limits(
         return None;
     }
 
-    let windows = [
-        (
-            "primary",
-            180_u64,
-            chatgpt_estimated_activity_limit(
-                "AI_USAGE_CHATGPT_3H_ACTIVITY_LIMIT",
-                CHATGPT_ESTIMATED_3H_ACTIVITY_LIMIT,
-            ),
-        ),
-        (
-            "secondary",
-            10080_u64,
-            chatgpt_estimated_activity_limit(
-                "AI_USAGE_CHATGPT_WEEKLY_ACTIVITY_LIMIT",
-                CHATGPT_ESTIMATED_WEEKLY_ACTIVITY_LIMIT,
-            ),
-        ),
-    ]
-    .into_iter()
-    .map(|(id, window_minutes, activity_limit)| {
-        let window_start_ms = now_ms - window_minutes as i64 * 60 * 1000;
-        let window_times = activity_times
-            .iter()
-            .copied()
-            .filter(|timestamp_ms| *timestamp_ms >= window_start_ms)
-            .collect::<Vec<_>>();
-        let resets_at_ms = window_times
-            .iter()
-            .min()
-            .map(|timestamp_ms| *timestamp_ms + window_minutes as i64 * 60 * 1000);
+    let windows = [("recent", 180_u64), ("weekly", 10080_u64)]
+        .into_iter()
+        .map(|(id, window_minutes)| {
+            let window_start_ms = now_ms - window_minutes as i64 * 60 * 1000;
+            let count = activity_times
+                .iter()
+                .filter(|timestamp_ms| **timestamp_ms >= window_start_ms)
+                .count() as u64;
 
-        estimated_rate_limit_window(
-            id,
-            rate_limit_window_label(window_minutes),
-            window_minutes,
-            window_times.len() as u64,
-            activity_limit,
-            resets_at_ms,
-        )
-    })
-    .collect();
+            ActivityWindow {
+                id: id.to_string(),
+                label: rate_limit_window_label(window_minutes),
+                count,
+                window_minutes,
+            }
+        })
+        .collect();
 
-    Some(RateLimits {
+    Some(ActivitySummary {
         updated_at: Some(iso_now()),
-        plan_type: Some("local_estimate".to_string()),
-        reached_type: None,
         windows,
     })
 }
@@ -5207,7 +5280,7 @@ fn read_chatgpt_stats(
         checked_at: "2026-07-02".to_string(),
     });
 
-    let estimated_rate_limits = build_chatgpt_estimated_rate_limits(&threads, Local::now());
+    let activity = build_chatgpt_activity_summary(&threads, Local::now());
     let mut stats = build_stats_from_threads(
         threads,
         Local::now(),
@@ -5218,7 +5291,7 @@ fn read_chatgpt_stats(
         false,
         paths,
     );
-    stats.rate_limits = estimated_rate_limits;
+    stats.activity = activity;
 
     Ok(finish_scan("chatgpt", started_at, stats, diagnostics))
 }
@@ -5436,7 +5509,7 @@ fn main() {
             install_update
         ])
         .build(tauri::generate_context!())
-        .expect("error while building AI Usage");
+        .expect("error while building Dial");
     app.run(handle_run_event);
 }
 
@@ -5500,6 +5573,9 @@ mod tests {
         assert!(alpha.clone().any(|value| value == 0));
         assert!(alpha.clone().any(|value| value == u8::MAX));
         assert_eq!(icon.rgba()[3], 0);
+        assert_eq!(icon.rgba()[(2 * 32 + 16) * 4 + 3], 0);
+        assert_eq!(icon.rgba()[(7 * 32 + 16) * 4 + 3], u8::MAX);
+        assert_eq!(icon.rgba()[(19 * 32 + 16) * 4 + 3], u8::MAX);
     }
 
     #[test]
@@ -5620,21 +5696,15 @@ mod tests {
     fn tray_copy_follows_selected_language() {
         assert_eq!(tray_language("zh-CN"), TrayLanguage::Zh);
         assert_eq!(tray_language("en-US"), TrayLanguage::En);
-        assert_eq!(
-            tray_menu_labels(TrayLanguage::Zh),
-            ("打开 AI Usage", "退出")
-        );
-        assert_eq!(
-            tray_menu_labels(TrayLanguage::En),
-            ("Open AI Usage", "Quit")
-        );
+        assert_eq!(tray_menu_labels(TrayLanguage::Zh), ("打开 Dial", "退出"));
+        assert_eq!(tray_menu_labels(TrayLanguage::En), ("Open Dial", "Quit"));
 
         let mut display = test_tray_display();
         display.remaining_percent = Some(47);
-        assert_eq!(tray_tooltip(&display), "AI Usage · Codex · 剩余 47%");
+        assert_eq!(tray_tooltip(&display), "Dial · Codex · 剩余 47%");
 
         display.language = TrayLanguage::En;
-        assert_eq!(tray_tooltip(&display), "AI Usage · Codex · 47% remaining");
+        assert_eq!(tray_tooltip(&display), "Dial · Codex · 47% remaining");
     }
 
     #[test]
@@ -6771,7 +6841,7 @@ mod tests {
     }
 
     #[test]
-    fn build_chatgpt_estimated_rate_limits_uses_recent_activity() {
+    fn build_chatgpt_activity_summary_counts_recent_activity() {
         let now = DateTime::parse_from_rfc3339("2026-06-30T12:00:00.000Z")
             .unwrap()
             .with_timezone(&Local);
@@ -6824,15 +6894,14 @@ mod tests {
             },
         ];
 
-        let limits =
-            build_chatgpt_estimated_rate_limits(&threads, now).expect("limits should exist");
+        let activity =
+            build_chatgpt_activity_summary(&threads, now).expect("activity should exist");
 
-        assert_eq!(limits.plan_type.as_deref(), Some("local_estimate"));
-        assert_eq!(limits.windows.len(), 2);
-        assert_eq!(limits.windows[0].window_minutes, 180);
-        assert!((limits.windows[0].used_percent - 1.25).abs() < f64::EPSILON);
-        assert_eq!(limits.windows[1].window_minutes, 10080);
-        assert!((limits.windows[1].used_percent - 0.4).abs() < f64::EPSILON);
+        assert_eq!(activity.windows.len(), 2);
+        assert_eq!(activity.windows[0].window_minutes, 180);
+        assert_eq!(activity.windows[0].count, 1);
+        assert_eq!(activity.windows[1].window_minutes, 10080);
+        assert_eq!(activity.windows[1].count, 2);
     }
 
     #[test]

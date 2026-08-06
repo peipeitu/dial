@@ -46,10 +46,10 @@ test("updater signature verification rejects a different public key", () => {
 });
 
 test("artifact verification checks both release platforms", (t) => {
-  const artifactsDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-usage-signatures-"));
+  const artifactsDir = fs.mkdtempSync(path.join(os.tmpdir(), "dial-signatures-"));
   t.after(() => fs.rmSync(artifactsDir, { recursive: true, force: true }));
 
-  for (const name of ["AI Usage_1.2.3_x64-setup.exe", "AI Usage_1.2.3_amd64.AppImage"]) {
+  for (const name of ["Dial_1.2.3_x64-setup.exe", "Dial_1.2.3_amd64.AppImage"]) {
     const artifact = path.join(artifactsDir, name);
     fs.writeFileSync(artifact, "test");
     fs.writeFileSync(`${artifact}.sig`, encodedSignature);
