@@ -6,12 +6,9 @@ const root = path.resolve(__dirname, "..");
 const buildDir = path.join(root, "build");
 const linuxDir = path.join(buildDir, "icons");
 
-const background = [23, 36, 32, 255];
-const glow = [31, 143, 131, 88];
-const ink = [234, 247, 243, 255];
-const mint = [117, 216, 203, 255];
-const teal = [73, 185, 174, 255];
-const pale = [185, 236, 228, 255];
+const background = [255, 255, 255, 255];
+const ink = [38, 49, 56, 255];
+const mint = [69, 201, 172, 255];
 
 fs.mkdirSync(buildDir, { recursive: true });
 fs.mkdirSync(linuxDir, { recursive: true });
@@ -110,19 +107,34 @@ function drawLine(data, size, line, color) {
   }
 }
 
+function drawArc(data, size, arc, color) {
+  const sweep = Math.abs(arc.endDegrees - arc.startDegrees);
+  const steps = Math.max(1, Math.ceil(sweep * 1.5));
+  for (let step = 0; step <= steps; step += 1) {
+    const progress = step / steps;
+    const degrees = arc.startDegrees + (arc.endDegrees - arc.startDegrees) * progress;
+    const radians = degrees * Math.PI / 180;
+    drawCircle(
+      data,
+      size,
+      {
+        cx: arc.cx + arc.radius * Math.cos(radians),
+        cy: arc.cy + arc.radius * Math.sin(radians),
+        radius: arc.width / 2,
+      },
+      color,
+    );
+  }
+}
+
 function renderIcon(size) {
   const data = Buffer.alloc(size * size * 4);
   drawRoundedRect(data, size, { x: 64, y: 64, width: 896, height: 896, radius: 218 }, background);
-  drawRoundedRect(data, size, { x: 580, y: 118, width: 306, height: 753, radius: 128 }, glow);
-  drawRoundedRect(data, size, { x: 255, y: 507, width: 86, height: 232, radius: 43 }, ink);
-  drawRoundedRect(data, size, { x: 385, y: 392, width: 86, height: 347, radius: 43 }, mint);
-  drawRoundedRect(data, size, { x: 515, y: 282, width: 86, height: 457, radius: 43 }, teal);
-  drawRoundedRect(data, size, { x: 645, y: 452, width: 86, height: 287, radius: 43 }, pale);
-  drawLine(data, size, { x1: 369, y1: 295, x2: 490, y2: 240, width: 34 }, ink);
-  drawLine(data, size, { x1: 490, y1: 240, x2: 656, y2: 295, width: 34 }, ink);
-  drawCircle(data, size, { cx: 344, cy: 307, radius: 28 }, ink);
-  drawCircle(data, size, { cx: 512, cy: 230, radius: 24 }, mint);
-  drawCircle(data, size, { cx: 681, cy: 306, radius: 28 }, ink);
+  drawArc(data, size, { cx: 512, cy: 580, radius: 294, width: 64, startDegrees: 166, endDegrees: 220 }, ink);
+  drawArc(data, size, { cx: 512, cy: 580, radius: 294, width: 64, startDegrees: 246, endDegrees: 294 }, ink);
+  drawArc(data, size, { cx: 512, cy: 580, radius: 294, width: 68, startDegrees: 320, endDegrees: 375 }, mint);
+  drawLine(data, size, { x1: 512, y1: 594, x2: 666, y2: 440, width: 64 }, mint);
+  drawCircle(data, size, { cx: 512, cy: 594, radius: 67 }, mint);
   return data;
 }
 
