@@ -1,6 +1,6 @@
 {
   "name": "dial",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "A cross-platform desktop dashboard for local AI coding usage statistics.",
   "desktopName": "dial",
   "license": "MIT",

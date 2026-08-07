@@ -53,6 +53,7 @@ const DEFAULT_SCAN_MAX_FILES: usize = 20_000;
 const CHATGPT_SQLITE_ROW_SCAN_LIMIT: usize = 2_000;
 const CLAUDE_ESTIMATED_5H_TOKEN_LIMIT: u64 = 500_000;
 const CLAUDE_ESTIMATED_WEEKLY_TOKEN_LIMIT: u64 = 2_500_000;
+const CODEX_MAIN_RATE_LIMIT_ID: &str = "codex";
 const TRAY_ID: &str = "ai-usage-status";
 const TRAY_STATUS_WINDOW_LABEL: &str = "tray-status";
 const TRAY_OPEN_MENU_ID: &str = "tray-open";
@@ -263,6 +264,8 @@ struct RateLimitWindow {
 #[serde(rename_all = "camelCase")]
 struct RateLimits {
     updated_at: Option<String>,
+    limit_id: Option<String>,
+    limit_name: Option<String>,
     plan_type: Option<String>,
     reached_type: Option<String>,
     windows: Vec<RateLimitWindow>,
@@ -2167,6 +2170,14 @@ fn normalize_rate_limits(rate_limits: Option<&Value>, timestamp_ms: i64) -> Opti
 
     Some(RateLimits {
         updated_at: iso_from_ms(timestamp_ms),
+        limit_id: rate_limits
+            .get("limit_id")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        limit_name: rate_limits
+            .get("limit_name")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         plan_type: rate_limits
             .get("plan_type")
             .and_then(Value::as_str)
@@ -2179,9 +2190,50 @@ fn normalize_rate_limits(rate_limits: Option<&Value>, timestamp_ms: i64) -> Opti
     })
 }
 
+#[derive(Clone, Copy)]
+enum CodexRateLimitSelection {
+    ExplicitMain,
+    LegacyUnidentified,
+}
+
+fn select_codex_rate_limit_source(usage_events: &[UsageEvent]) -> Option<CodexRateLimitSelection> {
+    if usage_events.iter().any(|event| {
+        event
+            .rate_limits
+            .as_ref()
+            .and_then(|rate_limits| rate_limits.limit_id.as_deref())
+            == Some(CODEX_MAIN_RATE_LIMIT_ID)
+    }) {
+        return Some(CodexRateLimitSelection::ExplicitMain);
+    }
+
+    usage_events
+        .iter()
+        .any(|event| {
+            event
+                .rate_limits
+                .as_ref()
+                .is_some_and(|rate_limits| rate_limits.limit_id.is_none())
+        })
+        .then_some(CodexRateLimitSelection::LegacyUnidentified)
+}
+
+fn matches_codex_rate_limit_source(
+    rate_limits: &RateLimits,
+    selection: CodexRateLimitSelection,
+) -> bool {
+    match selection {
+        CodexRateLimitSelection::ExplicitMain => {
+            rate_limits.limit_id.as_deref() == Some(CODEX_MAIN_RATE_LIMIT_ID)
+        }
+        CodexRateLimitSelection::LegacyUnidentified => rate_limits.limit_id.is_none(),
+    }
+}
+
 fn build_rate_limit_history(
     usage_events: &[UsageEvent],
     now_ms: i64,
+    selection: CodexRateLimitSelection,
 ) -> Vec<RateLimitHistorySeries> {
     let mut grouped = RateLimitHistoryGroups::new();
 
@@ -2189,6 +2241,9 @@ fn build_rate_limit_history(
         let Some(rate_limits) = event.rate_limits.as_ref() else {
             continue;
         };
+        if !matches_codex_rate_limit_source(rate_limits, selection) {
+            continue;
+        }
 
         for window in &rate_limits.windows {
             let window_ms = window.window_minutes as i64 * 60 * 1000;
@@ -2407,20 +2462,23 @@ fn build_stats_from_threads(
         .filter(|event| event.plan_type.is_some())
         .max_by_key(|event| event.timestamp_ms)
         .and_then(|event| event.plan_type.clone());
-    let latest_rate_limits = if rate_limits_enabled {
+    let rate_limit_selection = rate_limits_enabled
+        .then(|| select_codex_rate_limit_source(&usage_events))
+        .flatten();
+    let latest_rate_limits = rate_limit_selection.and_then(|selection| {
         usage_events
             .iter()
-            .filter(|event| event.rate_limits.is_some())
+            .filter(|event| {
+                event.rate_limits.as_ref().is_some_and(|rate_limits| {
+                    matches_codex_rate_limit_source(rate_limits, selection)
+                })
+            })
             .max_by_key(|event| event.timestamp_ms)
             .and_then(|event| event.rate_limits.clone())
-    } else {
-        None
-    };
-    let rate_limit_history = if rate_limits_enabled {
-        build_rate_limit_history(&usage_events, now.timestamp_millis())
-    } else {
-        Vec::new()
-    };
+    });
+    let rate_limit_history = rate_limit_selection
+        .map(|selection| build_rate_limit_history(&usage_events, now.timestamp_millis(), selection))
+        .unwrap_or_default();
 
     let mut daily_series = build_empty_daily_series(chart_days, now);
     let mut day_indexes = HashMap::new();
@@ -2729,7 +2787,7 @@ fn read_codex_stats(
     let outcome = scan_cache.scan(
         scan_request(
             "codex",
-            "codex-rollout-v1",
+            "codex-rollout-v2",
             std::slice::from_ref(&home),
             rollout_files,
             force,
@@ -3069,6 +3127,8 @@ fn build_claude_estimated_rate_limits(
 
     Some(RateLimits {
         updated_at: Some(iso_now()),
+        limit_id: None,
+        limit_name: None,
         plan_type: Some("local_estimate".to_string()),
         reached_type: None,
         windows,
@@ -5551,6 +5611,17 @@ mod tests {
         }
     }
 
+    fn test_rate_limits(limit_id: Option<&str>, remaining_percent: f64) -> RateLimits {
+        RateLimits {
+            updated_at: None,
+            limit_id: limit_id.map(str::to_string),
+            limit_name: None,
+            plan_type: Some("pro".to_string()),
+            reached_type: None,
+            windows: vec![test_rate_limit_window("primary", remaining_percent)],
+        }
+    }
+
     fn test_tray_display() -> TrayDisplayState {
         TrayDisplayState {
             language: TrayLanguage::Zh,
@@ -5675,6 +5746,8 @@ mod tests {
     fn tray_remaining_percent_prefers_primary_window_and_rounds() {
         let rate_limits = RateLimits {
             updated_at: None,
+            limit_id: None,
+            limit_name: None,
             plan_type: None,
             reached_type: None,
             windows: vec![
@@ -5690,6 +5763,8 @@ mod tests {
     fn tray_remaining_percent_falls_back_to_first_window_and_clamps() {
         let rate_limits = RateLimits {
             updated_at: None,
+            limit_id: None,
+            limit_name: None,
             plan_type: None,
             reached_type: None,
             windows: vec![test_rate_limit_window("rolling", 104.0)],
@@ -5755,6 +5830,8 @@ mod tests {
     fn normalize_rate_limits_keeps_only_available_periods() {
         let weekly_only = normalize_rate_limits(
             Some(&json!({
+                "limit_id": "codex",
+                "limit_name": "Codex",
                 "plan_type": "prolite",
                 "primary": {
                     "used_percent": 52.0,
@@ -5767,6 +5844,8 @@ mod tests {
         )
         .expect("weekly rate limit should be available");
 
+        assert_eq!(weekly_only.limit_id.as_deref(), Some("codex"));
+        assert_eq!(weekly_only.limit_name.as_deref(), Some("Codex"));
         assert_eq!(weekly_only.windows.len(), 1);
         assert_eq!(weekly_only.windows[0].label, "1 周");
         assert_eq!(weekly_only.windows[0].remaining_percent, 48.0);
@@ -6273,6 +6352,70 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(file_path.parent().unwrap());
+    }
+
+    #[test]
+    fn build_stats_keeps_newer_named_quota_from_overriding_codex() {
+        let codex_timestamp = DateTime::parse_from_rfc3339("2026-08-08T01:00:00.000Z")
+            .unwrap()
+            .timestamp_millis();
+        let spark_timestamp = DateTime::parse_from_rfc3339("2026-08-08T01:01:00.000Z")
+            .unwrap()
+            .timestamp_millis();
+        let thread = Thread {
+            id: "codex-quota-buckets".to_string(),
+            title: "Codex quota buckets".to_string(),
+            source: "Codex".to_string(),
+            model: "gpt-5.6".to_string(),
+            cwd: "/work/app".to_string(),
+            archived: false,
+            tokens_used: 20,
+            created_at_ms: codex_timestamp,
+            updated_at_ms: spark_timestamp,
+            rollout_path: String::new(),
+            usage_events: vec![
+                UsageEvent {
+                    thread_id: "codex-quota-buckets".to_string(),
+                    timestamp_ms: codex_timestamp,
+                    model: "gpt-5.6".to_string(),
+                    total_tokens: 10,
+                    plan_type: Some("pro".to_string()),
+                    rate_limits: Some(test_rate_limits(Some("codex"), 41.0)),
+                },
+                UsageEvent {
+                    thread_id: "codex-quota-buckets".to_string(),
+                    timestamp_ms: spark_timestamp,
+                    model: "gpt-5.3-codex-spark".to_string(),
+                    total_tokens: 10,
+                    plan_type: Some("pro".to_string()),
+                    rate_limits: Some(test_rate_limits(Some("codex_bengalfox"), 100.0)),
+                },
+            ],
+        };
+        let now = DateTime::parse_from_rfc3339("2026-08-08T01:02:00.000Z")
+            .unwrap()
+            .with_timezone(&Local);
+
+        let stats = build_stats_from_threads(
+            vec![thread],
+            now,
+            30,
+            test_account(),
+            None,
+            Some(CODEX_USD_PER_MILLION_TOKENS),
+            true,
+            json!({ "test": true }),
+        );
+
+        let rate_limits = stats.rate_limits.expect("Codex quota should be selected");
+        assert_eq!(rate_limits.limit_id.as_deref(), Some("codex"));
+        assert_eq!(rate_limits.windows[0].remaining_percent, 41.0);
+        assert_eq!(stats.rate_limit_history.len(), 1);
+        assert_eq!(stats.rate_limit_history[0].points.len(), 1);
+        assert_eq!(
+            stats.rate_limit_history[0].points[0].remaining_percent,
+            41.0
+        );
     }
 
     #[test]

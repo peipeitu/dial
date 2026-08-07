@@ -204,7 +204,7 @@ Tagged builds fail before packaging when the public or private key is missing. U
 A normal rerun never overwrites an existing published release: it verifies the public assets and exits successfully when they are healthy. If the current latest release is published but broken, start the current workflow from `main` and explicitly select the source tag to rebuild:
 
 ```sh
-gh workflow run build.yml --ref main -f platform=all -f package=true -f repair_release=true -f release_tag=v0.1.9
+gh workflow run build.yml --ref main -f platform=all -f package=true -f repair_release=true -f release_tag=v0.2.0
 ```
 
 Repair mode is accepted only for an existing release. A published target must be the current GitHub Latest release; a Draft target may resume an interrupted repair only when it is not older than the current Latest release. Repair keeps the current workflow tooling on `main` while building the application source from `release_tag`. Release publication jobs share a repository-wide queue, and the workflow checks GitHub Latest again immediately before publishing, so concurrent or historical runs cannot move the updater channel backwards.
@@ -212,7 +212,7 @@ Repair mode is accepted only for an existing release. A published target must be
 For a local signed release dry run, generate the manifest from already-built Windows and Linux artifacts:
 
 ```sh
-npm run updater:latest -- --artifacts release-artifacts --output release-artifacts/latest.json --repo peipeitu/dial --tag v0.1.9
+npm run updater:latest -- --artifacts release-artifacts --output release-artifacts/latest.json --repo peipeitu/dial --tag v0.2.0
 ```
 
 Linux AppImage GPG signing is optional and separate from the updater signature:
