@@ -60,6 +60,7 @@ test("updater manifest uses GitHub's normalized release asset names", (t) => {
   );
   assert.equal(manifest.platforms["windows-x86_64"].signature, "windows signature");
   assert.equal(manifest.platforms["linux-x86_64"].signature, "linux signature");
+  assert.equal("pub_date" in manifest, false);
 });
 
 test("updater manifest rejects a missing signature", (t) => {

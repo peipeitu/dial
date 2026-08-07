@@ -705,6 +705,12 @@ fn unsupported_update_info() -> UpdateInfo {
     }
 }
 
+#[cfg(any(windows, target_os = "linux"))]
+fn updater_published_at(date: time::OffsetDateTime) -> Option<String> {
+    DateTime::<Utc>::from_timestamp(date.unix_timestamp(), date.nanosecond())
+        .map(|date| date.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+}
+
 fn provider_label(provider: &str) -> &'static str {
     match provider {
         "claude" => "Claude Code",
@@ -1748,7 +1754,7 @@ async fn check_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
                 current_version: update.current_version,
                 version: Some(update.version),
                 notes: update.body,
-                published_at: update.date.map(|date| date.to_string()),
+                published_at: update.date.and_then(updater_published_at),
             }),
             None => Ok(UpdateInfo {
                 supported: true,
@@ -5560,6 +5566,17 @@ mod tests {
             pending_refresh_request_id: None,
             latest_refresh_request_id: 0,
         }
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn updater_timestamp_uses_browser_compatible_rfc3339() {
+        let date = time::OffsetDateTime::from_unix_timestamp(0).unwrap();
+
+        assert_eq!(
+            updater_published_at(date).as_deref(),
+            Some("1970-01-01T00:00:00.000Z")
+        );
     }
 
     #[cfg(target_os = "macos")]

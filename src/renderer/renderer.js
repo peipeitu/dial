@@ -1123,22 +1123,39 @@ function statsRatioPercent(value, total) {
   return (numerator / denominator) * 100;
 }
 
+function parseDateValue(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) return date;
+  if (typeof value !== "string") return null;
+
+  const tauriDate = value
+    .trim()
+    .match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}(?:\.\d+)?) ([+-]\d{2}:\d{2}):00$/);
+  if (!tauriDate) return null;
+
+  const normalized = new Date(`${tauriDate[1]}T${tauriDate[2]}${tauriDate[3]}`);
+  return Number.isNaN(normalized.getTime()) ? null : normalized;
+}
+
 function formatDate(value) {
-  if (!value) return "-";
+  const date = parseDateValue(value);
+  if (!date) return "-";
   return new Intl.DateTimeFormat(localeForLanguage(), {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit"
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function formatTime(value) {
-  if (!value) return "-";
+  const date = parseDateValue(value);
+  if (!date) return "-";
   return new Intl.DateTimeFormat(localeForLanguage(), {
     hour: "2-digit",
     minute: "2-digit"
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function renderSettingsStatus() {

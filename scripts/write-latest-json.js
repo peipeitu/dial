@@ -64,10 +64,10 @@ const linuxAppImage = findOne(
   "Linux AppImage",
 );
 
+// Older clients re-stringify pub_date into a value WebView2 cannot parse and fail to open the update dialog.
 const latest = {
   version,
   notes: `Dial ${version}`,
-  pub_date: new Date().toISOString(),
   platforms: {
     "windows-x86_64": {
       signature: signatureFor(windowsInstaller),

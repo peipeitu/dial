@@ -182,6 +182,41 @@ test("explicit dark theme is applied to the renderer body", () => {
   assert.equal(theme, "dark");
 });
 
+test("Tauri updater timestamps render without invalidating the update dialog", () => {
+  const { context, elements } = loadRenderer();
+
+  const result = JSON.parse(
+    vm.runInContext(
+      `JSON.stringify({
+        tauri: formatDate("2026-08-06 13:37:58.292 +00:00:00"),
+        invalid: formatDate("not-a-date")
+      })`,
+      context
+    )
+  );
+
+  assert.notEqual(result.tauri, "-");
+  assert.equal(result.invalid, "-");
+
+  vm.runInContext(
+    `
+      updateInfo = {
+        supported: true,
+        available: true,
+        currentVersion: "0.1.7",
+        version: "0.1.9",
+        notes: "Dial 0.1.9",
+        publishedAt: "2026-08-06 13:37:58.292 +00:00:00"
+      };
+      renderUpdateDialog();
+    `,
+    context
+  );
+
+  assert.equal(elements.get("dialogLatestVersion").textContent, "0.1.9");
+  assert.notEqual(elements.get("dialogPublishedAt").textContent, "-");
+});
+
 test("darwin uses macOS provider defaults instead of Windows paths", () => {
   const { context } = loadRenderer();
 
