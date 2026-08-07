@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 - 2026-08-08
+
+- Restore the Windows and Linux automatic-update dialog by serializing updater timestamps as RFC 3339, tolerating legacy Tauri date strings, and publishing manifests that remain compatible with already-installed clients.
+- Preserve Codex quota identifiers and keep the main `codex` quota separate from named limits such as GPT-5.3-Codex-Spark, so a newer independent 100% allowance cannot replace the actual main quota.
+- Rebuild the Codex scan cache with the corrected quota-bucket schema and cover both current quota selection and quota history with regression tests.
+
 ## 0.1.9 - 2026-08-06
 
 - Rename the product and repository from AI Usage to Dial while retaining the existing application identifier and local data locations for seamless upgrades.

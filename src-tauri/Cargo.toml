@@ -1,6 +1,6 @@
 [package]
 name = "dial"
-version = "0.1.9"
+version = "0.2.0"
 description = "A cross-platform desktop dashboard for local AI coding usage statistics."
 authors = ["peipeitu <peipeitu@users.noreply.github.com>"]
 license = "MIT"
