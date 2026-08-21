@@ -271,7 +271,7 @@ struct RateLimits {
     windows: Vec<RateLimitWindow>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RateLimitHistoryPoint {
     timestamp: String,
@@ -279,7 +279,7 @@ struct RateLimitHistoryPoint {
     remaining_percent: f64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RateLimitHistorySeries {
     id: String,
@@ -334,14 +334,28 @@ struct Stats {
 #[serde(rename_all = "camelCase")]
 struct UsageHistory {
     #[serde(default)]
-    codex: HashMap<String, DailyTokenHistory>,
+    codex: HashMap<String, CodexUsageHistory>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DailyTokenHistory {
+struct CodexUsageHistory {
     #[serde(default)]
     daily_tokens: HashMap<String, u64>,
+    #[serde(default)]
+    sessions: HashMap<String, HistoricalSession>,
+    #[serde(default)]
+    rate_limit_history: Vec<RateLimitHistorySeries>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoricalSession {
+    created_date: String,
+    model: String,
+    source: String,
+    workspace: String,
+    tokens_used: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1916,6 +1930,14 @@ fn thread_usage_total(thread: &Thread) -> u64 {
     }
 }
 
+fn workspace_name(cwd: &str) -> String {
+    Path::new(cwd)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(cwd)
+        .to_string()
+}
+
 fn format_plan_type(plan_type: Option<&str>) -> String {
     let Some(plan_type) = plan_type else {
         return "Codex".to_string();
@@ -2585,14 +2607,7 @@ fn build_stats_from_threads(
             threads
                 .iter()
                 .filter(|thread| !thread.cwd.is_empty())
-                .map(|thread| {
-                    let name = Path::new(&thread.cwd)
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or(&thread.cwd)
-                        .to_string();
-                    (name, thread_usage_total(thread))
-                }),
+                .map(|thread| (workspace_name(&thread.cwd), thread_usage_total(thread))),
             6,
         ),
         latest_threads,
@@ -2651,11 +2666,136 @@ fn codex_usage_history_key(home: &Path) -> String {
     home.to_string_lossy().to_string()
 }
 
+fn capture_codex_session_history(
+    history: &mut UsageHistory,
+    home: &Path,
+    threads: &[Thread],
+) -> bool {
+    let key = codex_usage_history_key(home);
+    let codex_history = history.codex.entry(key).or_default();
+    let mut changed = false;
+
+    for thread in threads {
+        let current = HistoricalSession {
+            created_date: local_date_key(thread.created_at_ms).unwrap_or_default(),
+            model: thread.model.clone(),
+            source: thread.source.clone(),
+            workspace: if thread.cwd.is_empty() {
+                String::new()
+            } else {
+                workspace_name(&thread.cwd)
+            },
+            tokens_used: thread_usage_total(thread),
+        };
+
+        if let Some(previous) = codex_history.sessions.get_mut(&thread.id) {
+            let updated = HistoricalSession {
+                created_date: if current.created_date.is_empty() {
+                    previous.created_date.clone()
+                } else {
+                    current.created_date
+                },
+                model: if current.model.is_empty() {
+                    previous.model.clone()
+                } else {
+                    current.model
+                },
+                source: if current.source.is_empty() {
+                    previous.source.clone()
+                } else {
+                    current.source
+                },
+                workspace: if current.workspace.is_empty() {
+                    previous.workspace.clone()
+                } else {
+                    current.workspace
+                },
+                tokens_used: previous.tokens_used.max(current.tokens_used),
+            };
+            if *previous != updated {
+                *previous = updated;
+                changed = true;
+            }
+        } else {
+            codex_history.sessions.insert(thread.id.clone(), current);
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+fn merge_rate_limit_history(
+    stored: &[RateLimitHistorySeries],
+    current: &[RateLimitHistorySeries],
+    now_ms: i64,
+) -> Vec<RateLimitHistorySeries> {
+    type PointsByTimestamp = HashMap<i64, (f64, f64)>;
+    let mut grouped: HashMap<(String, u64), (String, PointsByTimestamp)> = HashMap::new();
+
+    for series in stored.iter().chain(current) {
+        let window_ms = (series.window_minutes as i64).saturating_mul(60 * 1000);
+        if window_ms <= 0 {
+            continue;
+        }
+        let cutoff_ms = now_ms.saturating_sub(window_ms);
+        let entry = grouped
+            .entry((series.id.clone(), series.window_minutes))
+            .or_insert_with(|| (series.label.clone(), HashMap::new()));
+        entry.0 = series.label.clone();
+
+        for point in &series.points {
+            let Some(timestamp_ms) = DateTime::parse_from_rfc3339(&point.timestamp)
+                .ok()
+                .map(|timestamp| timestamp.timestamp_millis())
+            else {
+                continue;
+            };
+            if timestamp_ms < cutoff_ms {
+                continue;
+            }
+            entry
+                .1
+                .insert(timestamp_ms, (point.used_percent, point.remaining_percent));
+        }
+    }
+
+    let mut merged = grouped
+        .into_iter()
+        .map(|((id, window_minutes), (label, points))| {
+            let mut points = points.into_iter().collect::<Vec<_>>();
+            points.sort_by_key(|point| point.0);
+            if points.len() > 512 {
+                points.drain(0..points.len() - 512);
+            }
+            RateLimitHistorySeries {
+                id,
+                label,
+                window_minutes,
+                points: points
+                    .into_iter()
+                    .filter_map(|(timestamp_ms, (used_percent, remaining_percent))| {
+                        Some(RateLimitHistoryPoint {
+                            timestamp: iso_from_ms(timestamp_ms)?,
+                            used_percent,
+                            remaining_percent,
+                        })
+                    })
+                    .collect(),
+            }
+        })
+        .collect::<Vec<_>>();
+    merged.retain(|series| !series.points.is_empty());
+    merged.sort_by_key(|series| series.window_minutes);
+    merged
+}
+
 fn apply_codex_usage_history(
     history: &mut UsageHistory,
     home: &Path,
     stats: &mut Stats,
     usd_per_million_tokens: f64,
+    now_ms: i64,
 ) -> bool {
     if let Some(paths) = stats.paths.as_object_mut() {
         paths.insert(
@@ -2665,7 +2805,7 @@ fn apply_codex_usage_history(
     }
 
     let key = codex_usage_history_key(home);
-    let daily_history = history.codex.entry(key).or_default();
+    let codex_history = history.codex.entry(key).or_default();
     let mut changed = false;
 
     for day in &stats.daily_series {
@@ -2673,24 +2813,40 @@ fn apply_codex_usage_history(
             continue;
         }
 
-        let previous_tokens = daily_history
+        let previous_tokens = codex_history
             .daily_tokens
             .get(&day.date)
             .copied()
             .unwrap_or(0);
         if day.tokens > previous_tokens {
-            daily_history
+            codex_history
                 .daily_tokens
                 .insert(day.date.clone(), day.tokens);
             changed = true;
         }
     }
 
+    let merged_rate_limit_history = merge_rate_limit_history(
+        &codex_history.rate_limit_history,
+        &stats.rate_limit_history,
+        now_ms,
+    );
+    if codex_history.rate_limit_history != merged_rate_limit_history {
+        codex_history.rate_limit_history = merged_rate_limit_history;
+        changed = true;
+    }
+    stats.rate_limit_history = codex_history.rate_limit_history.clone();
+
     let estimate_cost = |tokens: u64| (tokens as f64 / 1_000_000.0) * usd_per_million_tokens;
     for day in &mut stats.daily_series {
-        if let Some(snapshot_tokens) = daily_history.daily_tokens.get(&day.date) {
+        if let Some(snapshot_tokens) = codex_history.daily_tokens.get(&day.date) {
             day.tokens = day.tokens.max(*snapshot_tokens);
         }
+        day.threads = codex_history
+            .sessions
+            .values()
+            .filter(|session| session.created_date == day.date)
+            .count() as u64;
         day.cost = estimate_cost(day.tokens);
     }
 
@@ -2703,7 +2859,7 @@ fn apply_codex_usage_history(
         .find(|day| day.tokens > 0)
         .map(|day| day.tokens)
         .unwrap_or(0);
-    let history_total: u64 = daily_history.daily_tokens.values().sum();
+    let history_total: u64 = codex_history.daily_tokens.values().sum();
 
     stats.featured.today_tokens = today_tokens;
     stats.featured.today_cost = estimate_cost(today_tokens);
@@ -2720,6 +2876,30 @@ fn apply_codex_usage_history(
         stats.featured.cost_estimated_from_token_events = true;
     }
     stats.totals.total_tokens = stats.totals.total_tokens.max(history_total);
+    stats.totals.threads = codex_history.sessions.len();
+    stats.models = rank_by_tokens_with_other(
+        codex_history
+            .sessions
+            .values()
+            .map(|session| (session.model.clone(), session.tokens_used)),
+        4,
+        "其他",
+    );
+    stats.sources = rank_by_tokens(
+        codex_history
+            .sessions
+            .values()
+            .map(|session| (session.source.clone(), 1)),
+        6,
+    );
+    stats.workspaces = rank_by_tokens(
+        codex_history
+            .sessions
+            .values()
+            .filter(|session| !session.workspace.is_empty())
+            .map(|session| (session.workspace.clone(), session.tokens_used)),
+        6,
+    );
 
     changed
 }
@@ -2740,6 +2920,8 @@ fn read_codex_stats(
     let started_at = Instant::now();
     let chart_days = settings.chart_days.clamp(MIN_CHART_DAYS, MAX_CHART_DAYS);
     let (home, state_db, paths) = codex_paths(settings);
+    let now = Local::now();
+    let now_ms = now.timestamp_millis();
 
     if !state_db.exists() {
         let mut stats = empty_stats(
@@ -2760,6 +2942,7 @@ fn read_codex_stats(
             &home,
             &mut stats,
             CODEX_USD_PER_MILLION_TOKENS,
+            now_ms,
         );
         if changed {
             let _ = save_usage_history(&history);
@@ -2821,9 +3004,11 @@ fn read_codex_stats(
         .max_by_key(|event| event.timestamp_ms)
         .and_then(|event| event.plan_type.as_deref());
     let account = read_codex_account(&home, latest_plan_type);
+    let mut history = load_usage_history();
+    let mut changed = capture_codex_session_history(&mut history, &home, &threads);
     let mut stats = build_stats_from_threads(
         threads,
-        Local::now(),
+        now,
         chart_days,
         account,
         Some(codex_pricing()),
@@ -2831,12 +3016,12 @@ fn read_codex_stats(
         true,
         paths,
     );
-    let mut history = load_usage_history();
-    let changed = apply_codex_usage_history(
+    changed |= apply_codex_usage_history(
         &mut history,
         &home,
         &mut stats,
         CODEX_USD_PER_MILLION_TOKENS,
+        now_ms,
     );
     if changed {
         let _ = save_usage_history(&history);
@@ -6023,6 +6208,7 @@ mod tests {
             }],
         };
         let mut history = UsageHistory::default();
+        capture_codex_session_history(&mut history, &home, std::slice::from_ref(&thread));
         let mut first_stats = build_stats_from_threads(
             vec![thread],
             now,
@@ -6039,6 +6225,7 @@ mod tests {
             &home,
             &mut first_stats,
             CODEX_USD_PER_MILLION_TOKENS,
+            timestamp_ms,
         ));
 
         let mut second_stats = build_stats_from_threads(
@@ -6057,6 +6244,7 @@ mod tests {
             &home,
             &mut second_stats,
             CODEX_USD_PER_MILLION_TOKENS,
+            timestamp_ms,
         ));
 
         assert_eq!(second_stats.featured.today_tokens, 1200);
@@ -6097,6 +6285,7 @@ mod tests {
             }],
         };
         let mut history = UsageHistory::default();
+        capture_codex_session_history(&mut history, &first_home, std::slice::from_ref(&thread));
         let mut first_stats = build_stats_from_threads(
             vec![thread],
             now,
@@ -6112,6 +6301,7 @@ mod tests {
             &first_home,
             &mut first_stats,
             CODEX_USD_PER_MILLION_TOKENS,
+            timestamp_ms,
         );
 
         let mut second_stats = build_stats_from_threads(
@@ -6129,10 +6319,154 @@ mod tests {
             &second_home,
             &mut second_stats,
             CODEX_USD_PER_MILLION_TOKENS,
+            timestamp_ms,
         );
 
         assert_eq!(second_stats.featured.period_tokens, 0);
         assert_eq!(second_stats.totals.total_tokens, 0);
+        assert_eq!(second_stats.totals.threads, 0);
+    }
+
+    #[test]
+    fn codex_usage_history_loads_legacy_daily_token_snapshots() {
+        let history: UsageHistory = serde_json::from_value(json!({
+            "codex": {
+                "/legacy/codex": {
+                    "dailyTokens": { "2026-06-30": 1234 }
+                }
+            }
+        }))
+        .unwrap();
+
+        let codex_history = history.codex.get("/legacy/codex").unwrap();
+        assert_eq!(codex_history.daily_tokens.get("2026-06-30"), Some(&1234));
+        assert!(codex_history.sessions.is_empty());
+        assert!(codex_history.rate_limit_history.is_empty());
+    }
+
+    #[test]
+    fn codex_usage_history_preserves_aggregates_after_session_deletion() {
+        let now = DateTime::parse_from_rfc3339("2026-06-30T12:00:00.000Z")
+            .unwrap()
+            .with_timezone(&Local);
+        let now_ms = now.timestamp_millis();
+        let home = env::temp_dir().join("ai-usage-codex-history-delete");
+        let kept = Thread {
+            id: "kept".to_string(),
+            title: "Kept session".to_string(),
+            source: "Codex CLI".to_string(),
+            model: "gpt-5.5".to_string(),
+            cwd: "/work/kept-workspace".to_string(),
+            archived: false,
+            tokens_used: 400,
+            created_at_ms: now_ms,
+            updated_at_ms: now_ms,
+            rollout_path: String::new(),
+            usage_events: vec![UsageEvent {
+                thread_id: "kept".to_string(),
+                timestamp_ms: now_ms,
+                model: "gpt-5.5".to_string(),
+                total_tokens: 400,
+                plan_type: None,
+                rate_limits: None,
+            }],
+        };
+        let deleted = Thread {
+            id: "deleted".to_string(),
+            title: "Deleted session".to_string(),
+            source: "Codex VS Code".to_string(),
+            model: "gpt-5.6".to_string(),
+            cwd: "/work/deleted-workspace".to_string(),
+            archived: false,
+            tokens_used: 600,
+            created_at_ms: now_ms,
+            updated_at_ms: now_ms,
+            rollout_path: String::new(),
+            usage_events: vec![UsageEvent {
+                thread_id: "deleted".to_string(),
+                timestamp_ms: now_ms,
+                model: "gpt-5.6".to_string(),
+                total_tokens: 600,
+                plan_type: Some("pro".to_string()),
+                rate_limits: Some(test_rate_limits(Some("codex"), 75.0)),
+            }],
+        };
+        let all_threads = vec![kept.clone(), deleted];
+        let mut history = UsageHistory::default();
+        assert!(capture_codex_session_history(
+            &mut history,
+            &home,
+            &all_threads,
+        ));
+        let mut first_stats = build_stats_from_threads(
+            all_threads,
+            now,
+            7,
+            test_account(),
+            Some(codex_pricing()),
+            Some(CODEX_USD_PER_MILLION_TOKENS),
+            true,
+            json!({ "test": true }),
+        );
+        assert!(apply_codex_usage_history(
+            &mut history,
+            &home,
+            &mut first_stats,
+            CODEX_USD_PER_MILLION_TOKENS,
+            now_ms,
+        ));
+
+        let mut second_stats = build_stats_from_threads(
+            vec![kept],
+            now,
+            7,
+            test_account(),
+            Some(codex_pricing()),
+            Some(CODEX_USD_PER_MILLION_TOKENS),
+            true,
+            json!({ "test": true }),
+        );
+        assert!(!apply_codex_usage_history(
+            &mut history,
+            &home,
+            &mut second_stats,
+            CODEX_USD_PER_MILLION_TOKENS,
+            now_ms,
+        ));
+
+        assert_eq!(second_stats.totals.threads, 2);
+        assert_eq!(second_stats.totals.active_threads, 1);
+        assert_eq!(second_stats.totals.archived_threads, 0);
+        assert_eq!(second_stats.totals.total_tokens, 1000);
+        assert_eq!(second_stats.daily_series.last().unwrap().threads, 2);
+        assert_eq!(second_stats.daily_series.last().unwrap().tokens, 1000);
+        assert_eq!(second_stats.latest_threads.len(), 1);
+        assert_eq!(second_stats.latest_threads[0].id, "kept");
+        assert!(second_stats.rate_limits.is_none());
+        assert_eq!(second_stats.rate_limit_history.len(), 1);
+        assert_eq!(second_stats.rate_limit_history[0].points.len(), 1);
+
+        let models = second_stats
+            .models
+            .iter()
+            .map(|item| (item.name.as_str(), item.value))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(models.get("gpt-5.5"), Some(&400));
+        assert_eq!(models.get("gpt-5.6"), Some(&600));
+        let sources = second_stats
+            .sources
+            .iter()
+            .map(|item| (item.name.as_str(), item.value))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(sources.get("Codex CLI"), Some(&1));
+        assert_eq!(sources.get("Codex VS Code"), Some(&1));
+        let workspaces = second_stats
+            .workspaces
+            .iter()
+            .map(|item| (item.name.as_str(), item.value))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(workspaces.get("kept-workspace"), Some(&400));
+        assert_eq!(workspaces.get("deleted-workspace"), Some(&600));
     }
 
     #[test]
