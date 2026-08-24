@@ -92,7 +92,7 @@ jobs:
           path: release-source
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -158,7 +158,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -230,7 +230,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -315,7 +315,7 @@ jobs:
           path: release-source
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
