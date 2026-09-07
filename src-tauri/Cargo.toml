@@ -11,7 +11,7 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 chrono = "0.4"
 dirs = "6"
 rfd = "0.17"
@@ -19,7 +19,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = ["tray-icon"] }
-time = "=0.3.53"
+time = "=0.3.55"
 tokio = { version = "1", features = ["sync", "time"] }
 walkdir = "2"
 
@@ -28,5 +28,5 @@ tauri-plugin-updater = "2"
 url = "2"
 
 [target.'cfg(windows)'.dependencies]
-png = "0.17"
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+png = "0.18"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
