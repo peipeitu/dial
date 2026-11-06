@@ -1278,7 +1278,7 @@ fn set_windows_taskbar_icon(
 ) -> Result<isize, Box<dyn std::error::Error>> {
     let mut bgra = image.rgba().to_vec();
     let mut and_mask = Vec::with_capacity(bgra.len() / 4);
-    for pixel in bgra.chunks_exact_mut(4) {
+    for pixel in bgra.as_chunks_mut::<4>().0 {
         and_mask.push(pixel[3].wrapping_sub(u8::MAX));
         pixel.swap(0, 2);
     }
