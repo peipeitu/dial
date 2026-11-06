@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "macos")]
+mod macos_tray_menu;
 mod scan_cache;
 
 use std::{
@@ -22,9 +24,11 @@ use rusqlite::{Connection, OpenFlags};
 use scan_cache::{cache_source_key, ScanCacheStore, ScanDiagnostics, ScanRequest, ScannedFile};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+#[cfg(not(target_os = "macos"))]
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    tray::TrayIconBuilder,
     Emitter, Manager,
 };
 #[cfg(any(test, target_os = "windows"))]
@@ -71,6 +75,7 @@ struct TrayDisplayState {
     language: TrayLanguage,
     active_provider: String,
     remaining_percent: Option<u8>,
+    windows: Vec<RateLimitWindow>,
     theme: String,
     accent_color: String,
     auto_refresh_enabled: bool,
@@ -88,6 +93,7 @@ struct TrayStatusPayload {
     provider: String,
     provider_label: String,
     remaining_percent: Option<u8>,
+    windows: Vec<RateLimitWindow>,
     usage_label: String,
     status_label: String,
     open_label: String,
@@ -759,11 +765,21 @@ fn tray_menu_labels(language: TrayLanguage) -> (&'static str, &'static str) {
 }
 
 impl TrayDisplayState {
-    fn update_usage(&mut self, provider: &str, remaining_percent: Option<u8>) -> bool {
+    fn update_usage(&mut self, provider: &str, rate_limits: Option<&RateLimits>) -> bool {
         if self.active_provider != provider {
             return false;
         }
-        self.remaining_percent = remaining_percent;
+        self.remaining_percent = tray_remaining_percent(rate_limits);
+        self.windows = rate_limits
+            .map(|limits| {
+                limits
+                    .windows
+                    .iter()
+                    .filter(|window| is_available_rate_limit_window(window))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
         self.refresh_failed = false;
         true
     }
@@ -841,6 +857,7 @@ fn tray_status_payload(display: &TrayDisplayState) -> TrayStatusPayload {
         provider: display.active_provider.clone(),
         provider_label: provider_label(&display.active_provider).to_string(),
         remaining_percent: display.remaining_percent,
+        windows: display.windows.clone(),
         usage_label: usage_label.to_string(),
         status_label,
         open_label: open_label.to_string(),
@@ -933,6 +950,8 @@ fn apply_tray_display(app: &tauri::AppHandle, display: &TrayDisplayState) {
     }
     let _ = tray.set_tooltip(Some(tray_tooltip(display)));
     emit_tray_status(app, display);
+    #[cfg(target_os = "macos")]
+    macos_tray_menu::update(app, display);
 }
 
 fn sync_tray_settings(app: &tauri::AppHandle, settings: &Settings) {
@@ -950,6 +969,7 @@ fn sync_tray_settings(app: &tauri::AppHandle, settings: &Settings) {
         if provider_changed {
             display.active_provider = settings.active_provider.clone();
             display.remaining_percent = None;
+            display.windows.clear();
             display.refresh_failed = false;
             display.latest_refresh_request_id =
                 display.latest_refresh_request_id.wrapping_add(1).max(1);
@@ -1006,7 +1026,7 @@ fn complete_external_tray_refresh(
         display.is_refreshing = false;
         match result {
             Ok(stats) => {
-                display.update_usage(provider, tray_remaining_percent(stats.rate_limits.as_ref()));
+                display.update_usage(provider, stats.rate_limits.as_ref());
             }
             Err(_) => display.refresh_failed = true,
         }
@@ -1081,10 +1101,7 @@ async fn refresh_active_tray_usage(app: tauri::AppHandle, mut request_id: u64) {
                     display.is_refreshing = false;
                     match &result {
                         Ok((provider, stats)) if display.active_provider == *provider => {
-                            display.update_usage(
-                                provider,
-                                tray_remaining_percent(stats.rate_limits.as_ref()),
-                            );
+                            display.update_usage(provider, stats.rate_limits.as_ref());
                         }
                         _ => display.refresh_failed = true,
                     }
@@ -1184,7 +1201,7 @@ fn toggle_tray_status_window(
     if let Ok(Some(monitor)) = app.monitor_from_point(tray_center_x, tray_center_y) {
         let window_size = window
             .outer_size()
-            .unwrap_or_else(|_| PhysicalSize::new(320, 156));
+            .unwrap_or_else(|_| PhysicalSize::new(360, 320));
         let position = tray_status_window_position(
             tray_position,
             tray_size,
@@ -1394,24 +1411,25 @@ fn create_tray_status_window(app: &tauri::App) -> Result<(), Box<dyn std::error:
         return Ok(());
     }
 
-    tauri::WebviewWindowBuilder::new(
+    let builder = tauri::WebviewWindowBuilder::new(
         app,
         TRAY_STATUS_WINDOW_LABEL,
         tauri::WebviewUrl::App("tray.html".into()),
     )
     .title("Dial Status")
-    .inner_size(320.0, 156.0)
+    .inner_size(360.0, 320.0)
     .resizable(false)
     .maximizable(false)
     .minimizable(false)
     .closable(false)
     .decorations(false)
-    .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
     .visible(false)
-    .shadow(true)
-    .build()?;
+    .shadow(true);
+    #[cfg(target_os = "windows")]
+    let builder = builder.transparent(true);
+    builder.build()?;
     Ok(())
 }
 
@@ -1428,15 +1446,17 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
-        .show_menu_on_left_click(false)
+        .show_menu_on_left_click(cfg!(target_os = "macos"))
         .title("--%")
         .tooltip("Dial")
         .on_menu_event(|app, event| match event.id().as_ref() {
             TRAY_OPEN_MENU_ID => show_main_window(app),
             TRAY_QUIT_MENU_ID => app.exit(0),
             _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
+        });
+    #[cfg(not(target_os = "macos"))]
+    {
+        tray = tray.on_tray_icon_event(|tray, event| {
             #[cfg(target_os = "windows")]
             if let TrayIconEvent::Click {
                 rect,
@@ -1457,7 +1477,7 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
 
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
@@ -1467,6 +1487,7 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 show_main_window(tray.app_handle());
             }
         });
+    }
 
     #[cfg(target_os = "macos")]
     {
@@ -1494,10 +1515,13 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         tray = tray.icon(icon);
     }
     tray.build(app)?;
+    #[cfg(target_os = "macos")]
+    macos_tray_menu::start_countdown_timer();
     let display = TrayDisplayState {
         language,
         active_provider: settings.active_provider.clone(),
         remaining_percent: None,
+        windows: Vec::new(),
         theme: settings.theme,
         accent_color: settings.accent_color,
         auto_refresh_enabled: settings.auto_refresh_enabled,
@@ -5812,6 +5836,7 @@ mod tests {
             language: TrayLanguage::Zh,
             active_provider: "codex".to_string(),
             remaining_percent: Some(50),
+            windows: Vec::new(),
             theme: "system".to_string(),
             accent_color: "blue".to_string(),
             auto_refresh_enabled: false,
@@ -5879,12 +5904,24 @@ mod tests {
         let position = tray_status_window_position(
             PhysicalPosition::new(1800.0, 1040.0),
             PhysicalSize::new(24, 24),
-            PhysicalSize::new(320, 156),
+            PhysicalSize::new(360, 320),
             PhysicalPosition::new(0, 0),
             PhysicalSize::new(1920, 1080),
         );
 
-        assert_eq!(position, PhysicalPosition::new(1592, 876));
+        assert_eq!(position, PhysicalPosition::new(1552, 712));
+    }
+
+    #[test]
+    fn tray_status_window_sits_below_retina_menu_bar() {
+        let position = tray_status_window_position(
+            PhysicalPosition::new(2400.0, 0.0),
+            PhysicalSize::new(60, 48),
+            PhysicalSize::new(720, 640),
+            PhysicalPosition::new(0, 0),
+            PhysicalSize::new(3024, 1964),
+        );
+        assert_eq!(position, PhysicalPosition::new(2070, 56));
     }
 
     #[test]
@@ -5963,10 +6000,34 @@ mod tests {
     fn tray_display_rejects_usage_from_inactive_provider() {
         let mut display = test_tray_display();
 
-        assert!(!display.update_usage("claude", Some(90)));
+        assert!(!display.update_usage("claude", Some(&test_rate_limits(None, 90.0))));
         assert_eq!(display.remaining_percent, Some(50));
-        assert!(display.update_usage("codex", Some(45)));
+        assert!(display.update_usage("codex", Some(&test_rate_limits(None, 45.0))));
         assert_eq!(display.remaining_percent, Some(45));
+    }
+
+    #[test]
+    fn tray_payload_keeps_quota_periods_and_reset_times_together() {
+        let mut display = test_tray_display();
+        let mut limits = test_rate_limits(None, 78.0);
+        limits.windows[0].resets_at = Some("2026-11-13T06:00:00Z".to_string());
+        let mut weekly = test_rate_limit_window("secondary", 42.0);
+        weekly.window_minutes = 10080;
+        limits.windows.push(weekly);
+        let mut invalid = test_rate_limit_window("invalid", 0.0);
+        invalid.window_minutes = 0;
+        limits.windows.push(invalid);
+        display.update_usage("codex", Some(&limits));
+        let payload = tray_status_payload(&display);
+        assert_eq!(payload.windows.len(), 2);
+        assert_eq!(payload.windows[0].remaining_percent, 78.0);
+        assert_eq!(payload.windows[0].resets_at, limits.windows[0].resets_at);
+        assert_eq!(payload.windows[1].window_minutes, 10080);
+        assert!(!display.update_usage("claude", None));
+        assert_eq!(display.windows.len(), 2);
+        display.update_usage("codex", None);
+        assert!(tray_status_payload(&display).windows.is_empty());
+        assert_eq!(display.remaining_percent, None);
     }
 
     #[test]
