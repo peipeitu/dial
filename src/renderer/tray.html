@@ -21,7 +21,8 @@
         <button id="openButton" class="open-button" type="button">打开详情</button>
       </header>
 
-      <section class="usage-summary">
+      <div id="quotaList" class="quota-list"></div>
+      <section id="usageSummary" class="usage-summary">
         <div class="usage-heading">
           <span id="usageLabel">剩余用量</span>
           <strong id="usageValue">--</strong>
@@ -29,8 +30,8 @@
         <div id="usageTrack" class="usage-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuetext="暂无可用数据">
           <span id="usageFill" class="usage-fill"></span>
         </div>
-        <p id="usageMeta">正在读取...</p>
       </section>
+      <p id="usageMeta" class="usage-meta">正在读取...</p>
     </main>
 
     <script type="module" src="./tray-entry.js"></script>

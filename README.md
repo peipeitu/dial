@@ -47,7 +47,7 @@ Dial is a small cross-platform Tauri desktop dashboard for local AI coding usage
 - Includes settings for Codex directory, Claude Code directory, GitHub Copilot directory, Cursor directory, ChatGPT directory, theme, accent color, chart period, enabled providers, and auto-refresh interval.
 - Defaults to a 30-day chart period.
 - Auto refresh can be disabled or configured in minutes. Manual refresh resets the auto-refresh countdown.
-- Shows remaining usage in the system tray, with a Windows popup for provider details and refresh status.
+- Shows remaining usage in the system tray, with quota progress and live reset countdowns embedded in the macOS menu and shown in a Windows popup.
 
 ## Development
 

@@ -557,8 +557,12 @@ name = "dial"
 version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
+ "block2",
  "chrono",
  "dirs",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "png 0.17.16",
  "rfd",
  "rusqlite",

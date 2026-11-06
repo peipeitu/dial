@@ -18,10 +18,16 @@ rfd = "0.17"
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "~2.11", features = ["tray-icon"] }
 time = "=0.3.53"
 tokio = { version = "1", features = ["sync", "time"] }
 walkdir = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSTimer", "NSRunLoop", "NSDate", "NSString", "NSGeometry", "block2"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSBox", "NSTextField", "NSColor", "NSFont", "NSMenu", "NSMenuItem", "NSView", "NSControl", "NSCell", "NSText", "NSGraphics", "NSEvent"] }
 
 [target.'cfg(any(windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
